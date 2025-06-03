@@ -52,13 +52,40 @@ export abstract class DynamicServerApp<T extends Record<string, any>> {
   }
 }
 
-export async function runDynamicApp<T extends Record<string, any>>(
-  appInstance: DynamicServerApp<T>
-): Promise<void> {
-  const { state, rawFlags } = cliToState(appInstance.getState() as T);
+export async function runDynamicApp<T extends Record<string, any>>(appInstance: DynamicServerApp<T>): Promise<void> {
+  const rawDefaults = appInstance as unknown as T;
+
+  const { state, rawFlags, mode, targetKeys } = cliToState(rawDefaults);
   const stateDiff = diffStatePatch(state, appInstance.getState() as T);
 
   const routes = buildRoutes(appInstance);
+
+if (mode === "get" && targetKeys.length > 0) {
+  const isRunning = await appInstance.probe();
+  const current = isRunning
+    ? await (await fetch(`http://localhost:${appInstance.port}/state`)).json()
+    : appInstance.getState();
+
+  for (const key of targetKeys) {
+    const currentState = current as Record<string, any>;
+    console.log(`${key}:`, currentState[key]);
+  }
+  return;
+}
+
+  if (mode === "set" && Object.keys(stateDiff).length > 0) {
+    const isRunning = await appInstance.probe();
+    if (isRunning) {
+      await appInstance.set(stateDiff);
+      const res = await fetch(`http://localhost:${appInstance.port}/state`);
+      const json = await res.json();
+      console.log("Remote state updated:", json);
+    } else {
+      appInstance.applyStateUpdate(stateDiff);
+      console.log("Local state updated:", appInstance.getState());
+    }
+    return;
+  }
 
   if (rawFlags.length) {
     const handler = routes[`/${rawFlags[0]}`];
@@ -68,6 +95,8 @@ export async function runDynamicApp<T extends Record<string, any>>(
   if (!(await appInstance.probe())) {
     console.log(`Starting server on port ${appInstance.port}...`);
     return startServer(appInstance, { port: appInstance.port, routes });
+  } else {
+    console.log(`Server is already running on port ${appInstance.port}.`);
   }
 
   if (Object.keys(stateDiff).length > 0) {
@@ -107,17 +136,22 @@ export function startServer<T extends Record<string, any>>(
       const method = req.method;
 
       if (url.pathname === "/state") {
-        if (method === "GET") return Response.json(appInstance.getState());
+        if (method === "GET") {
+          return Response.json(appInstance.getState());
+        }
 
         if (method === "POST") {
           try {
             const body = await req.json() as Partial<T>;
             appInstance.applyStateUpdate(body);
-            return Response.json({ status: "updated", state: appInstance.getState() });
+            const updated = appInstance.getState();
+            return Response.json({ status: "updated", state: updated });
           } catch {
             return Response.json({ error: "Invalid JSON" }, { status: 400 });
           }
         }
+
+        return new Response("Method Not Allowed", { status: 405 });
       }
 
       const routeHandler = routes[url.pathname];
@@ -135,39 +169,56 @@ export function startServer<T extends Record<string, any>>(
   });
 }
 
+
 // src/core/CLI.ts
-export function cliToState<T extends Record<string, any>>(defaults: T): { state: T; rawFlags: string[] } {
+export function cliToState<T extends Record<string, any>>(defaults: T): { state: T; rawFlags: string[]; mode: "get" | "set" | null; targetKeys: string[] } {
   const args = process.argv.slice(2);
   const state = { ...defaults };
   const rawFlags: string[] = [];
+  let mode: "get" | "set" | null = null;
+  const targetKeys: string[] = [];
 
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
-    if (!arg?.startsWith("--")) continue;
 
-    const key = arg.slice(2) as keyof T;
-    const next = args[i + 1];
+    if (arg === "-get") {
+      mode = "get";
+      continue;
+    }
 
-    if (key in defaults) {
-      const current = defaults[key];
-      const type = typeof current;
+    if (arg === "-set") {
+      mode = "set";
+      continue;
+    }
 
-      if (type === "number" && next && !isNaN(Number(next))) {
-        state[key] = Number(next) as T[typeof key];
-        i++;
-      } else if (type === "boolean") {
-        state[key] = (next === undefined || next === "true") as T[typeof key];
-      } else if (next && !next.startsWith("--")) {
-        state[key] = next as T[typeof key];
-        i++;
+    if (arg?.startsWith("--")) {
+      const key = arg.slice(2) as keyof T;
+      const next = args[i + 1];
+
+      if (mode === "get") {
+        targetKeys.push(String(key));
+      } else if (mode === "set") {
+        const current = defaults[key];
+        const type = typeof current;
+
+        if (type === "number" && next && !isNaN(Number(next))) {
+          state[key] = Number(next) as T[typeof key];
+          i++;
+        } else if (type === "boolean") {
+          state[key] = (next === undefined || next === "true") as T[typeof key];
+        } else if (next && !next.startsWith("--")) {
+          state[key] = next as T[typeof key];
+          i++;
+        }
+      } else {
+        rawFlags.push(key as string);
       }
-    } else {
-      rawFlags.push(String(key));
     }
   }
 
-  return { state, rawFlags };
+  return { state, rawFlags, mode, targetKeys };
 }
+
 
 export function diffStatePatch<T extends Record<string, any>>(cliArgs: T, defaults: T): Partial<T> {
   const patch: Partial<T> = {};
