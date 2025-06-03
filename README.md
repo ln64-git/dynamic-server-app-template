@@ -61,7 +61,6 @@ runDynamicApp(new SampleClass());
 
 | Flag          | Description                     |
 | ------------- | ------------------------------- |
-| `--key value` | Set a state field (with `-set`) |
 | `-get --key`  | Display current key value(s)    |
 | `-set --key`  | Set key state                   |
 
