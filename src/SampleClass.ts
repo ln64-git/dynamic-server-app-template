@@ -1,15 +1,17 @@
+import { z } from "zod";
 import { DynamicServerApp } from "./app";
 
-interface ServerState {
-  port: number;
-  message: string;
-}
+export class SampleClass extends DynamicServerApp<z.infer<typeof SampleClass.schema>> {
+  static schema = z.object({
+    port: z.number(),
+    message: z.string(),
+  });
 
-export class SampleClass extends DynamicServerApp<ServerState> {
+  schema = SampleClass.schema;
   port = 1996;
   message = "Hello, world!";
 
-  public async sampleFunction(): Promise<void> {
+  async sampleFunction(): Promise<void> {
     console.log(this.message);
   }
 }

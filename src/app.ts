@@ -1,20 +1,28 @@
-
+import { ZodObject } from "zod";
 
 export abstract class DynamicServerApp<T extends Record<string, any>> {
   abstract port: number;
+  abstract schema: ZodObject<any>;
 
   getState(): Partial<T> {
     const state: Partial<T> = {};
-    const self = this as unknown as T & ThisType<this>;
-    for (const key of Object.getOwnPropertyNames(self) as (keyof T)[]) {
-      const val = self[key];
-      if (typeof val !== "function") state[key] = val;
-    }
+    let obj = this;
+    do {
+      for (const key of Object.getOwnPropertyNames(obj)) {
+        if (key === "schema" || typeof (this as any)[key] === "function") continue;
+        try {
+          const val = (this as any)[key];
+          if (!(key in state)) (state as any)[key] = val;
+        } catch { }
+      }
+      obj = Object.getPrototypeOf(obj);
+    } while (obj && obj !== Object.prototype);
     return state;
   }
 
   applyStateUpdate(data: Partial<T>): void {
-    Object.entries(data).forEach(([key, value]) => {
+    const validated = this.schema.partial().parse(data);
+    Object.entries(validated).forEach(([key, value]) => {
       if (key in this) (this as any)[key] = value;
     });
   }
@@ -44,11 +52,13 @@ export abstract class DynamicServerApp<T extends Record<string, any>> {
   }
 
   async set(diff: Partial<T>): Promise<void> {
-    await fetch(`http://localhost:${this.port}/state`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(diff),
-    });
+    try {
+      await fetch(`http://localhost:${this.port}/state`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(diff),
+      });
+    } catch { }
   }
 }
 
@@ -60,18 +70,18 @@ export async function runDynamicApp<T extends Record<string, any>>(appInstance: 
 
   const routes = buildRoutes(appInstance);
 
-if (mode === "get" && targetKeys.length > 0) {
-  const isRunning = await appInstance.probe();
-  const current = isRunning
-    ? await (await fetch(`http://localhost:${appInstance.port}/state`)).json()
-    : appInstance.getState();
+  if (mode === "get" && targetKeys.length > 0) {
+    const isRunning = await appInstance.probe();
+    const current = isRunning
+      ? await (await fetch(`http://localhost:${appInstance.port}/state`)).json()
+      : appInstance.getState();
 
-  for (const key of targetKeys) {
-    const currentState = current as Record<string, any>;
-    console.log(`${key}:`, currentState[key]);
+    for (const key of targetKeys) {
+      const currentState = current as Record<string, any>;
+      console.log(`${key}:`, currentState[key]);
+    }
+    return;
   }
-  return;
-}
 
   if (mode === "set" && Object.keys(stateDiff).length > 0) {
     const isRunning = await appInstance.probe();
@@ -110,13 +120,14 @@ function buildRoutes<T extends Record<string, any>>(
   return Object.getOwnPropertyNames(Object.getPrototypeOf(appInstance))
     .filter(key => key !== "constructor" && typeof (appInstance as any)[key] === "function")
     .reduce((acc, key) => {
-      acc[`/${key}`] = async (app) => await (app as any)[key]();
+      acc[`/${key}`] = async (app, args) => await (app as any)[key](...(args || []));
       return acc;
     }, {} as Record<string, RemoteAction<T>>);
 }
 
 export type RemoteAction<T extends Record<string, any>> = (
-  appInstance: DynamicServerApp<T>
+  appInstance: DynamicServerApp<T>,
+  args?: any
 ) => Promise<any>;
 
 export function startServer<T extends Record<string, any>>(
@@ -146,8 +157,8 @@ export function startServer<T extends Record<string, any>>(
             appInstance.applyStateUpdate(body);
             const updated = appInstance.getState();
             return Response.json({ status: "updated", state: updated });
-          } catch {
-            return Response.json({ error: "Invalid JSON" }, { status: 400 });
+          } catch (err: any) {
+            return Response.json({ error: err.message || "Invalid JSON" }, { status: 400 });
           }
         }
 
@@ -157,7 +168,8 @@ export function startServer<T extends Record<string, any>>(
       const routeHandler = routes[url.pathname];
       if (method === "POST" && routeHandler) {
         try {
-          const result = await routeHandler(appInstance);
+          const args = await req.json();
+          const result = await routeHandler(appInstance, args);
           return Response.json({ status: "ok", result });
         } catch (err: any) {
           return Response.json({ error: err.message }, { status: 500 });
@@ -168,8 +180,6 @@ export function startServer<T extends Record<string, any>>(
     },
   });
 }
-
-
 // src/core/CLI.ts
 export function cliToState<T extends Record<string, any>>(defaults: T): { state: T; rawFlags: string[]; mode: "get" | "set" | null; targetKeys: string[] } {
   const args = process.argv.slice(2);

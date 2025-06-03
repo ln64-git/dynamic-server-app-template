@@ -1,68 +1,110 @@
-# Dynamic Server App Template
+# 🧙‍♂️ Dynamic Server App Template
 
-A template for turning any class into a dynamic, remotely controllable service via CLI or HTTP.
+A powerful, type-safe, schema-driven dynamic server framework built on **Bun** + **Zod**. Extend this abstract class to build highly customizable backend apps with introspectable state, CLI control, and auto-routed HTTP methods.
 
-## Overview
+## ✨ Features
 
-This framework was designed to **interact with class-based applications** both locally and remotely. It exposes internal state and methods of your class through:
+- 🧠 State introspection & dynamic updates
+- 🛡️ Zod-validated schema binding
+- ⚙️ Built-in HTTP JSON API (`/state`, `/method`)
+- 🧪 Probes for live server detection
+- 📟 CLI flags to get/set server state directly
+- 🧬 Auto-routing of class methods as endpoints
 
-- **CLI flags** — Set state at launch (`--key value`)
-- **HTTP API** — Get/set state or invoke methods via REST
+## 📦 Tech Stack
 
-Everything is inferred directly from your class.
+- [Bun](https://bun.sh)
+- [Zod](https://zod.dev)
 
----
+## 🔧 Usage
 
-## Key Features
-
-- 🧠 Auto-generates HTTP API from class methods
-- 🔁 Live state view/update via `/state`
-- 🛰 Remote method invocation
-- 🛠 CLI-to-class-state mapping
-- ⚡️ Runs fast with Bun
-
----
-
-## Example
+### 1. Extend the `DynamicServerApp`
 
 ```ts
-class SampleApp extends DynamicServerApp<{ port: number; message: string }> {
-  port = 3000;
-  message = "Hello";
+import { z } from "zod";
+import { DynamicServerApp } from "./app";
 
-  async greet() {
+export class SampleClass extends DynamicServerApp<z.infer<typeof SampleClass.schema>> {
+  static schema = z.object({
+    port: z.number(),
+    message: z.string(),
+  });
+
+  schema = SampleClass.schema;
+  port = 1996;
+  message = "Hello, world!";
+
+  async sampleFunction(): Promise<void> {
     console.log(this.message);
   }
 }
 ````
 
-Run it:
+### 2. Run the App
 
-```bash
-bun run src/index.ts --message "Hi" --port 4000
+```ts
+import { runDynamicApp } from "./app";
+import { SampleClass } from "./SampleClass";
+
+runDynamicApp(new SampleClass());
 ```
 
-Interact:
+## 🖥️ API Endpoints
 
-* `GET /state` → `{ "message": "Hi", "port": 4000 }`
-* `POST /state` → update values
-* `POST /greet` → logs message
+| Endpoint         | Method | Description                            |
+| ---------------- | ------ | -------------------------------------- |
+| `/state`         | GET    | Fetch current application state        |
+| `/state`         | POST   | Update application state via JSON      |
+| `/<method-name>` | POST   | Auto-exposed instance methods via path |
 
----
+## 🧪 CLI Flags
 
-## Usage
+| Flag          | Description                     |
+| ------------- | ------------------------------- |
+| `--key value` | Set a state field (with `-set`) |
+| `-get --key`  | Display current key value(s)    |
+| `-set --key`  | Set key state                   |
 
-1. Extend `DynamicServerApp<T>`
-2. Add state fields and async methods
-3. Run with `runDynamicApp(new YourClass())`
+## 🚀 Server Lifecycle
 
----
+1. If CLI `-get`/`-set` provided → runs as command client.
+2. If server not detected → spins up new Bun HTTP server.
+3. Auto-routes all non-constructor methods as POST endpoints.
 
-## Perfect For
+## 🧠 Method Routing Example
 
-* CLI tools with web APIs
-* Background workers or daemons
-* Dev tools with live tweaking
-* Remote control surfaces for local code
+```ts
+// Call this remotely:
+await fetch('/sampleFunction', { method: 'POST' });
+```
 
+## 📚 Schema Validation
 
+All state changes and updates are type-checked and validated using the provided `ZodObject` schema. Automatically supports partial updates.
+
+## 🧙‍♂️ CLI to State
+
+CLI state parsing supports dynamic mutation via `--key value` syntax. Use `-get` to fetch specific keys, `-set` to apply.
+
+## 🛠️ Development & Deployment
+
+To run locally:
+
+```bash
+bun run index.ts
+```
+
+To deploy, consider:
+
+* 📦 [Replit](https://replit.com/)
+* 🌐 [Netlify Drop](https://app.netlify.com/drop)
+* 🧳 Or containerize with Docker
+
+## 🔐 Type Safety
+
+Powered by `z.infer<typeof schema>` — state and routes are always strictly typed.
+
+## 🧩 Extensibility
+
+* Add any methods → automatically exposed as API routes.
+* Add more fields to the Zod schema → instantly supported in state.
