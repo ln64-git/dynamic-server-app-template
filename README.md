@@ -1,6 +1,6 @@
 # Dynamic Server App Template
 
-A template for turning any class-based application into a dynamic, remotely controllable service via CLI or HTTP.
+A template for turning any class into a dynamic, remotely controllable service via CLI or HTTP.
 
 ## Overview
 
