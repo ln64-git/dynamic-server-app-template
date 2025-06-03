@@ -1,0 +1,16 @@
+{
+  "name": "serve-class-template",
+  "module": "main.ts",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "start": "bun run src/main.ts",
+    "watch": "bun --watch src/main.ts "
+  },
+  "devDependencies": {
+    "@types/bun": "latest"
+  },
+  "peerDependencies": {
+    "typescript": "^5"
+  }
+}
