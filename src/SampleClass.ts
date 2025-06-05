@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { DynamicServerApp } from "./app";
+import { DynamicServerApp } from "../core/app";
 
 export class SampleClass extends DynamicServerApp<z.infer<typeof SampleClass.schema>> {
   static schema = z.object({

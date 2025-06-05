@@ -1,7 +1,7 @@
 // DynamicServerApp.test.ts
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { z } from "zod";
-import { DynamicServerApp } from "../src/app";
+import { DynamicServerApp } from "../core/app";
 
 // Sample implementation to test
 class TestApp extends DynamicServerApp<z.infer<typeof TestApp.schema>> {
