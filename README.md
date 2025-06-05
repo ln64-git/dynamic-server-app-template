@@ -61,9 +61,9 @@ runDynamicApp(new SampleClass());
 
 | Flag          | Description                     |
 | ------------- | ------------------------------- |
-| `--key value` | Set a state field (with `-set`) |
-| `-get --key`  | Display current key value(s)    |
-| `-set --key`  | Set key state                   |
+| `--key value` | Shorthand to set a state value  |
+| `-get --key`  | Display the current state value |
+| `-set --key`  | Set a state value interactively |
 
 ## 🚀 Server Lifecycle
 
