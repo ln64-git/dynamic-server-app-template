@@ -24,12 +24,12 @@
     "noUnusedParameters": false,
     "noPropertyAccessFromIndexSignature": false,
     // Initalize template
-    "baseUrl": ".",
+    "baseUrl": ".", // This is critical
     "paths": {
       "@core/*": [
         "core/*"
       ]
-    }
+    },
   },
   "include": [
     "src",

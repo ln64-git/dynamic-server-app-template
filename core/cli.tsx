@@ -1,13 +1,13 @@
-import React, { useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { Box, Text, useInput, useApp } from "ink";
 import TextInput from "ink-text-input";
-import type { DynamicServerApp } from "../app";
+import type { DynamicServerApp } from "./app";
 
 export interface AppProps<T extends Record<string, any>> {
   app: DynamicServerApp<T>;
 }
 
-export default function App<T extends Record<string, any>>({ app }: AppProps<T>) {
+export function AppCli<T extends Record<string, any>>({ app }: AppProps<T>) {
   const { exit } = useApp();
   const [editingKey, setEditingKey] = useState<keyof T | null>(null);
   const [inputValue, setInputValue] = useState("");
@@ -16,7 +16,7 @@ export default function App<T extends Record<string, any>>({ app }: AppProps<T>)
   async function refresh() {
     if (await app.probe()) {
       const res = await fetch(`http://localhost:${app.port}/state`);
-      setState(await res.json());
+      setState((await res.json()) as Partial<T>);
     } else {
       setState(app.getState());
     }
@@ -27,6 +27,7 @@ export default function App<T extends Record<string, any>>({ app }: AppProps<T>)
   }, []);
 
   const keys = Object.keys(state) as (keyof T)[];
+  const editableKeys = keys.filter(k => k !== "port");
 
   useInput(async (input, key) => {
     if (key.escape) {
@@ -35,7 +36,7 @@ export default function App<T extends Record<string, any>>({ app }: AppProps<T>)
     }
     if (!editingKey && /[1-9]/.test(input)) {
       const idx = Number(input) - 1;
-      const target = keys[idx];
+      const target = editableKeys[idx];
       if (target) {
         setEditingKey(target);
         setInputValue(String((state as any)[target] ?? ""));
@@ -65,7 +66,7 @@ export default function App<T extends Record<string, any>>({ app }: AppProps<T>)
       ) : (
         <Box flexDirection="column" marginTop={1}>
           <Text>Press number to edit field</Text>
-          {keys.map((key, idx) => (
+          {editableKeys.map((key, idx) => (
             <Text key={String(key)}>
               {idx + 1}. {String(key)}
             </Text>

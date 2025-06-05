@@ -82,6 +82,14 @@ export abstract class DynamicServerApp<T extends Record<string, any>> {
 export async function runDynamicApp<T extends Record<string, any>>(appInstance: DynamicServerApp<T>): Promise<void> {
   const rawDefaults = appInstance.getState() as T;
 
+  const portArgIndex = process.argv.indexOf("--port");
+  if (portArgIndex > -1 && process.argv[portArgIndex + 1]) {
+    const portOverride = Number(process.argv[portArgIndex + 1]);
+    if (!isNaN(portOverride)) {
+      appInstance.port = portOverride;
+    }
+  }
+
   const { state, rawFlags, mode, targetKeys } = cliToState(rawDefaults);
   const stateDiff = diffStatePatch(state, appInstance.getState() as T);
 
@@ -142,7 +150,6 @@ export async function runDynamicApp<T extends Record<string, any>>(appInstance: 
   }
 
   if (!(await appInstance.probe())) {
-    console.log(`Starting server...`);
     return startServer(appInstance, { port: appInstance.port, routes });
   } else {
     console.log(`Server is already running on port ${appInstance.port}.`);
@@ -261,9 +268,7 @@ export function startServer<T extends Record<string, any>>(
     res.end("Not Found");
   });
 
-  server.listen(port, () => {
-    console.log(`Server listening on port ${port}`);
-  });
+  server.listen(port);
 }
 
 // src/core/CLI.ts

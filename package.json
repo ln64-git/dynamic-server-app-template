@@ -1,11 +1,11 @@
 {
   "name": "serve-class-template",
-  "module": "main.ts",
+  "module": "main.tsx",
   "type": "module",
   "private": true,
   "scripts": {
-    "start": "bun run src/main.ts",
-    "watch": "bun --watch src/main.ts "
+    "start": "bun run src/main.tsx",
+    "watch": "bun --watch src/main.tsx "
   },
   "devDependencies": {
     "@types/bun": "latest",
