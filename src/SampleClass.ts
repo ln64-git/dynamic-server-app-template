@@ -4,6 +4,7 @@ import { DynamicServerApp } from "../core/app";
 export type SampleState = z.infer<typeof SampleSchema>;
 export const SampleSchema = z.object({
   port: z.number(),
+  message: z.string(),
 });
 
 export class SampleClass extends DynamicServerApp<SampleState> {
@@ -11,7 +12,7 @@ export class SampleClass extends DynamicServerApp<SampleState> {
   port = 2000;
   message = "Hello, world!";
 
-  async sampleFunction(): Promise<void> {
-    console.log(this.message);
+  async sampleFunction(): Promise<string> {
+    return (this.message + " called from sampleFunction");
   }
 }
