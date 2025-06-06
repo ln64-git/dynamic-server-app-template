@@ -94,12 +94,6 @@ To run locally:
 bun run index.ts
 ```
 
-To deploy, consider:
-
-* 📦 [Replit](https://replit.com/)
-* 🌐 [Netlify Drop](https://app.netlify.com/drop)
-* 🧳 Or containerize with Docker
-
 ## 🔐 Type Safety
 
 Powered by `z.infer<typeof schema>` — state and routes are always strictly typed.

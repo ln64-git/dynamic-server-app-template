@@ -63,7 +63,14 @@ export abstract class DynamicServerApp<T extends Record<string, any>> {
     }
   }
 
-  async set(diff: Partial<T>): Promise<void> {
+  async set(diff: Partial<T>): Promise<Partial<T> | undefined> {
+    const isLocalServer = await this.probe() === false;
+
+    if (isLocalServer) {
+      this.applyStateUpdate(diff);
+      return this.getState(); // immediate result
+    }
+
     try {
       const res = await fetch(`http://localhost:${this.port}/state`, {
         method: "POST",
@@ -72,11 +79,17 @@ export abstract class DynamicServerApp<T extends Record<string, any>> {
       });
 
       const response = await res.json();
-      console.log("✅ Server response:", response);
+      if (response && typeof response === "object" && "state" in response) {
+        return (response as { state: Partial<T> }).state;
+      }
     } catch (e) {
       console.error("❌ Failed to set state:", e);
     }
+
+    return undefined;
   }
+
+
 }
 
 export async function runDynamicApp<T extends Record<string, any>>(appInstance: DynamicServerApp<T>): Promise<void> {
@@ -151,8 +164,6 @@ export async function runDynamicApp<T extends Record<string, any>>(appInstance: 
 
   if (!(await appInstance.probe())) {
     return startServer(appInstance, { port: appInstance.port, routes });
-  } else {
-    console.log(`Server is already running on port ${appInstance.port}.`);
   }
 
   if (Object.keys(stateDiff).length > 0) {
@@ -181,15 +192,19 @@ export type RemoteAction<T extends Record<string, any>> = (
 
 import http from "http";
 
-export function startServer<T extends Record<string, any>>(
+export async function startServer<T extends Record<string, any>>(
   appInstance: DynamicServerApp<T>,
   options: {
     port?: number;
     routes?: Record<string, RemoteAction<T>>;
   } = {}
 ) {
-  const port = options.port ?? 2001;
+  let port = options.port ?? 2001;
   const routes = options.routes ?? {};
+
+  // 🔍 Ensure port is free or find a new one
+  port = await findAvailablePort(port);
+  appInstance.port = port;
 
   const server = http.createServer(async (req, res) => {
     const url = new URL(req.url ?? "/", `http://${req.headers.host}`);
@@ -207,10 +222,12 @@ export function startServer<T extends Record<string, any>>(
         req.on("data", chunk => (body += chunk));
         req.on("end", () => {
           try {
+            if (!body) throw new Error("Empty request body");
+
             const parsed = JSON.parse(body);
             const before = appInstance.getState();
-
             const patch: Partial<T> = {};
+
             for (const key in parsed) {
               if (!isEqual(parsed[key], before[key])) {
                 (patch as any)[key] = parsed[key];
@@ -219,23 +236,18 @@ export function startServer<T extends Record<string, any>>(
 
             if (Object.keys(patch).length > 0) {
               appInstance.applyStateUpdate(patch);
-              console.log("✅ State updated:", appInstance.getState());
-            } else {
-              console.log("⏭ No differences, skipping update");
             }
 
+            const newState = appInstance.getState();
             res.writeHead(200, { "Content-Type": "application/json" });
-            res.end(JSON.stringify({ status: "ok", state: appInstance.getState() }));
+            res.end(JSON.stringify({ status: "ok", state: newState }));
           } catch (err: any) {
-            console.error("❌ Parse error:", err);
             res.writeHead(400, { "Content-Type": "application/json" });
             res.end(JSON.stringify({ error: err.message || "Invalid JSON" }));
           }
         });
-
         return;
       }
-
 
       res.writeHead(405);
       res.end("Method Not Allowed");
@@ -270,6 +282,7 @@ export function startServer<T extends Record<string, any>>(
 
   server.listen(port);
 }
+
 
 // src/core/CLI.ts
 export function cliToState<T extends Record<string, any>>(defaults: T): { state: T; rawFlags: string[]; mode: "get" | "set" | null; targetKeys: string[] } {
@@ -329,4 +342,26 @@ export function diffStatePatch<T extends Record<string, any>>(cliArgs: T, curren
     }
   }
   return patch;
+}
+
+
+import net from "net";
+
+async function findAvailablePort(start: number, maxAttempts = 50): Promise<number> {
+  let port = start;
+  for (let i = 0; i < maxAttempts; i++) {
+    const isFree = await new Promise<boolean>((resolve) => {
+      const tester = net.createServer()
+        .once("error", () => resolve(false))
+        .once("listening", function () {
+          tester.close();
+          resolve(true);
+        })
+        .listen(port);
+    });
+
+    if (isFree) return port;
+    port++;
+  }
+  throw new Error(`No available ports found starting from ${start}`);
 }
