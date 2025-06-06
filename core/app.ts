@@ -4,6 +4,7 @@ import { isEqual } from "lodash"; // or write your own deepCompare
 export abstract class DynamicServerApp<T extends Record<string, any>> {
   abstract port: number;
   abstract schema: ZodObject<any>;
+  isServerInstance: boolean = false; // ← new field
 
   getState(): Partial<T> {
     const state: Partial<T> = {};
@@ -93,83 +94,46 @@ export abstract class DynamicServerApp<T extends Record<string, any>> {
 }
 
 export async function runDynamicApp<T extends Record<string, any>>(appInstance: DynamicServerApp<T>): Promise<void> {
-  const rawDefaults = appInstance.getState() as T;
+  const defaults = appInstance.getState() as T;
+  const { command, key, value, returnOutput } = cliToState(defaults);
+  const isRunning = await appInstance.probe();
 
-  const portArgIndex = process.argv.indexOf("--port");
-  if (portArgIndex > -1 && process.argv[portArgIndex + 1]) {
-    const portOverride = Number(process.argv[portArgIndex + 1]);
-    if (!isNaN(portOverride)) {
-      appInstance.port = portOverride;
+  if (command === "get" && key) {
+    const current: Partial<T> = isRunning
+      ? await fetch(`http://localhost:${appInstance.port}/state`).then((r) => r.json() as Promise<Partial<T>>)
+      : appInstance.getState();
+
+    const output = current[key as keyof T];
+    console.log(returnOutput ? output : `${output}`);
+    process.exit(0);
+  }
+
+  if (command === "set" && key && value !== undefined) {
+    const update = { [key]: value } as Partial<T>;
+    await appInstance.set(update);
+    if (returnOutput) {
+      const current = appInstance.getState();
+      console.log(current[key as keyof T]);
     }
+    process.exit(0);
   }
 
-  const { state, rawFlags, mode, targetKeys } = cliToState(rawDefaults);
-  const stateDiff = diffStatePatch(state, appInstance.getState() as T);
+  if (command === "call" && key) {
+    const result = isRunning
+      ? await fetch(`http://localhost:${appInstance.port}/${key}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify([]),
+      }).then((r) => r.json()).then((res) => (res as { result: any }).result)
+      : await (appInstance as any)[key]();
 
-  const routes = buildRoutes(appInstance);
-
-  if (mode === "get" && targetKeys.length > 0) {
-    const isRunning = await appInstance.probe(); // ✅ define this first
-    let current: Partial<T> = {};
-
-    if (isRunning) {
-      const res = await fetch(`http://localhost:${appInstance.port}/state`);
-      current = await res.json() as Partial<T>;
-    } else {
-      current = appInstance.getState();
-    }
-
-    for (const key of targetKeys) {
-      const currentState = current as Record<string, any>;
-      console.log(`${key}:`, currentState[key]);
-    }
-    return;
+    console.log(returnOutput ? result : `${result}`);
+    process.exit(0);
   }
 
-  if (mode === "set" && Object.keys(stateDiff).length > 0) {
-    const isRunning = await appInstance.probe();
-    if (isRunning) {
-      await appInstance.set(stateDiff);
-      const res = await fetch(`http://localhost:${appInstance.port}/state`);
-      const json = await res.json();
-    } else {
-      appInstance.applyStateUpdate(stateDiff);
-    }
-    return;
-  }
-
-  if (rawFlags.length) {
-    const handler = routes[`/${rawFlags[0]}`];
-    const isRunning = await appInstance.probe();
-
-    if (handler) {
-      if (isRunning) {
-        console.log(`🛰️ Proxying --${rawFlags[0]} to running server at port ${appInstance.port}...`);
-        const argsToSend = JSON.stringify(process.argv.slice(3)); // add this
-        const res = await fetch(`http://localhost:${appInstance.port}/${rawFlags[0]}`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: argsToSend,
-        });
-        const json = await res.json();
-        console.log("✅ Remote result:", json);
-        return;
-      } else {
-        console.log(`🚀 Invoking local method --${rawFlags[0]}`);
-        await handler(appInstance, process.argv.slice(3)); // add this
-        return;
-      }
-    }
-  }
-
-  if (!(await appInstance.probe())) {
-    return startServer(appInstance, { port: appInstance.port, routes });
-  }
-
-  if (Object.keys(stateDiff).length > 0) {
-    await appInstance.set(stateDiff);
-  }
+  return startServer(appInstance, { port: appInstance.port, routes: buildRoutes(appInstance) });
 }
+
 
 function buildRoutes<T extends Record<string, any>>(
   appInstance: DynamicServerApp<T>
@@ -279,59 +243,44 @@ export async function startServer<T extends Record<string, any>>(
     res.writeHead(404);
     res.end("Not Found");
   });
-
+  
+  appInstance.isServerInstance = true;
   server.listen(port);
 }
 
 
 // src/core/CLI.ts
-export function cliToState<T extends Record<string, any>>(defaults: T): { state: T; rawFlags: string[]; mode: "get" | "set" | null; targetKeys: string[] } {
+export function cliToState<T extends Record<string, any>>(defaults: T): {
+  command: "get" | "set" | "call" | null;
+  key?: string;
+  value?: string;
+  returnOutput: boolean;
+} {
   const args = process.argv.slice(2);
-  const state = { ...defaults };
-  const rawFlags: string[] = [];
-  let mode: "get" | "set" | null = null;
-  const targetKeys: string[] = [];
+  let command: "get" | "set" | "call" | null = null;
+  let returnOutput = false;
+  let key: string | undefined;
+  let value: string | undefined;
 
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
 
-    if (arg === "-get") {
-      mode = "get";
-      continue;
+    if (arg === "get" || arg === "set" || arg === "call") {
+      command = arg;
+      key = args[i + 1];
+      value = args[i + 2];
+      break;
     }
 
-    if (arg === "-set") {
-      mode = "set";
-      continue;
-    }
-
-    if (arg?.startsWith("--")) {
-      const key = arg.slice(2) as keyof T;
-      const next = args[i + 1];
-
-      if (mode === "get") {
-        targetKeys.push(String(key));
-      } else if (mode === "set") {
-        const current = defaults[key];
-        const type = typeof current;
-
-        if (type === "number" && next && !isNaN(Number(next))) {
-          state[key] = Number(next) as T[typeof key];
-          i++;
-        } else if (type === "boolean") {
-          state[key] = (next === undefined || next === "true") as T[typeof key];
-        } else if (next && !next.startsWith("--")) {
-          state[key] = next as T[typeof key];
-          i++;
-        }
-      } else {
-        rawFlags.push(key as string);
-      }
+    if (arg === "--return") {
+      returnOutput = true;
     }
   }
 
-  return { state, rawFlags, mode, targetKeys };
+  return { command, key, value, returnOutput };
 }
+
+
 
 
 export function diffStatePatch<T extends Record<string, any>>(cliArgs: T, currentState: Partial<T>): Partial<T> {

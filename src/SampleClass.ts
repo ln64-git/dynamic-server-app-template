@@ -10,9 +10,11 @@ export const SampleSchema = z.object({
 export class SampleClass extends DynamicServerApp<SampleState> {
   schema = SampleSchema;
   port = 2000;
+
   message = "Hello, world!";
 
   async sampleFunction(): Promise<string> {
     return (this.message + " called from sampleFunction");
   }
+  
 }

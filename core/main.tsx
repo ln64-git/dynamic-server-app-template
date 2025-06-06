@@ -1,11 +1,15 @@
 #!/usr/bin/env bun
 import { render } from "ink";
 import { SampleClass } from "../src/SampleClass";
-import { runDynamicApp } from "@core/app";
+import { cliToState, runDynamicApp } from "@core/app";
 import { AppCli } from "@core/cli";
 
 const instance = new SampleClass();
+const { returnOutput } = cliToState(instance.getState());
 
-runDynamicApp(instance);
+await runDynamicApp(instance);
 
-render(<AppCli app={instance} />);
+// Only render the UI if --return is NOT present
+if (!returnOutput) {
+  render(<AppCli app={instance} />);
+}

@@ -28,15 +28,13 @@ export function AppCli({ app }: AppProps) {
     const isRunning = await app.probe();
     const data = isRunning
       ? await fetch(`http://localhost:${app.port}/state`).then((r) => r.json())
-      : app.getState(); // local fallback
-
+      : app.getState();
     setState({ ...(typeof data === "object" && data !== null ? data : {}) });
   }
 
   useEffect(() => {
     let interval: NodeJS.Timeout;
     const initialize = async () => {
-      // Show placeholders first using schema
       const schemaKeys = Object.keys(app.schema.shape);
       setState((prev) => {
         const placeholder: Record<string, any> = {};
@@ -61,13 +59,17 @@ export function AppCli({ app }: AppProps) {
 
   async function handleCommand(command: string) {
     const [cmd, ...args] = command.trim().split(" ");
+
     if (cmd === "exit") return exit();
+
     if (cmd === "get") {
       const key = args[0];
       if (!key) return setLogMessage("Please specify a key.");
       if (key === "port") return setLogMessage(`Access to 'port' is restricted.`);
       setLogMessage(`${state[key as keyof typeof state] ?? ""}`);
-    } else if (cmd === "set") {
+    }
+
+    else if (cmd === "set") {
       const key = String(args[0]);
       if (key === "port") return setLogMessage(`'port' cannot be modified.`);
       const value = args.slice(1).join(" ");
@@ -78,8 +80,11 @@ export function AppCli({ app }: AppProps) {
         await refresh();
       }
       setLogMessage(`set ${key}: ${value}`);
-    } else if (cmd?.endsWith("()")) {
-      const fn = cmd.slice(0, -2);
+    }
+
+    else if (cmd === "call" || cmd?.endsWith("()")) {
+      const fn = cmd === "call" ? args[0] : cmd.slice(0, -2);
+      if (!fn) return setLogMessage("Please specify a function to call.");
       try {
         const isRunning = await app.probe();
         const result = isRunning
@@ -95,26 +100,32 @@ export function AppCli({ app }: AppProps) {
       } catch (e: any) {
         setLogMessage(`Error: ${e.message}`);
       }
-    } else {
+    }
+
+    else {
       setLogMessage(`Unknown command: ${command}`);
     }
+
     setHistory((prev) => [...prev, command]);
     setHistoryIndex(null);
     setInputValue("");
   }
 
   const className = app.constructor.name;
+
   function renderTypedInput() {
     const [first, ...rest] = inputValue.trim().split(" ");
     const key = rest[0];
     const valueText = rest.slice(1).join(" ");
     const isFn = inputValue.trim().endsWith("()");
     const isGetSet = first === "get" || first === "set";
+    const isCall = first === "call";
     const isKnownVariable = key && Object.prototype.hasOwnProperty.call(state, key);
-    if (isGetSet) {
+
+    if (isGetSet || isCall) {
       return (
         <Text>
-          <Text color="magenta">{first}</Text>
+          <Text color={isCall ? "yellow" : "magenta"}>{first}</Text>
           {key && (
             <>
               <Text> </Text>
@@ -130,7 +141,9 @@ export function AppCli({ app }: AppProps) {
         </Text>
       );
     }
+
     if (isFn) return <Text color="blue">{inputValue}</Text>;
+
     return <Text color="cyan">{inputValue}</Text>;
   }
 
@@ -161,12 +174,13 @@ export function AppCli({ app }: AppProps) {
       <Text>
         <Text color="cyan" bold>{className}</Text>
         <Text color="gray"> (port {app.port})</Text>
-        {isSynced && <Text color="red"> (Remote)</Text>}
+        {isSynced && !app.isServerInstance && <Text color="red"> (Remote)</Text>}
       </Text>
+
       <Text bold>Variables:</Text>
       <Box flexDirection="column" paddingLeft={2}>
         {Object.entries(state)
-          .filter(([key]) => key !== "port")
+          .filter(([key]) => key !== "port" && key !== "isServerInstance")
           .map(([key, val]) => (
             <Text key={key}>
               <Text color="gray">{key.padEnd(12)}</Text>
@@ -176,6 +190,7 @@ export function AppCli({ app }: AppProps) {
             </Text>
           ))}
       </Box>
+
       <Text bold>Functions:</Text>
       <Box flexDirection="column" paddingLeft={2}>
         {functionNames.map((fn) => (
@@ -184,14 +199,17 @@ export function AppCli({ app }: AppProps) {
           </Text>
         ))}
       </Box>
+
       <Box paddingTop={1}>
         <Text color="white"> {logMessage}</Text>
       </Box>
+
       <Box>
         <Text color="cyan">▸ </Text>
         {renderTypedInput()}
         {cursorVisible && <Text color="cyan">│</Text>}
       </Box>
+
       <Box height={0}>
         <TextInput
           value={inputValue}
