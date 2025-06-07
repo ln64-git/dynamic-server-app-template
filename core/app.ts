@@ -126,8 +126,12 @@ export async function runDynamicApp<T extends Record<string, any>>(appInstance: 
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify([]),
       }).then((r) => r.json()).then((res) => (res as { result: any }).result)
-      : await (appInstance as any)[key]();
-
+      : (typeof (appInstance as any)[key] === "function"
+        ? await (appInstance as any)[key]()
+        : (() => {
+          console.error(`error: '${key}' is not a valid function on ${appInstance.constructor.name}.`);
+          process.exit(0);
+        })());
     if (result !== undefined) {
       console.log(returnOutput ? result : `${result}`);
     }
