@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Box, Text, useApp, useInput } from "ink";
+import { Box, Text, useApp, useInput, } from "ink";
 import TextInput from "ink-text-input";
 import type { DynamicServerApp } from "./app";
 
@@ -11,18 +11,10 @@ export function AppCli({ app }: AppProps) {
   const { exit } = useApp();
   const [state, setState] = useState<Record<string, any>>({});
   const [inputValue, setInputValue] = useState("");
-  const [logMessage, setLogMessage] = useState<string | null>(null);
   const [history, setHistory] = useState<string[]>([]);
   const [historyIndex, setHistoryIndex] = useState<number | null>(null);
   const [isSynced, setIsSynced] = useState<boolean>(false);
   const [cursorVisible, setCursorVisible] = useState(true);
-
-  useEffect(() => {
-    app.logToUI = (msg: string) => setLogMessage(msg);
-    return () => {
-      app.logToUI = null;
-    };
-  }, []);
 
   useEffect(() => {
     const cursorInterval = setInterval(() => {
@@ -71,27 +63,27 @@ export function AppCli({ app }: AppProps) {
 
     if (cmd === "get") {
       const key = args[0];
-      if (!key) return setLogMessage("Please specify a key.");
-      if (key === "port") return setLogMessage(`Access to 'port' is restricted.`);
-      setLogMessage(`${state[key as keyof typeof state] ?? ""}`);
+      if (!key) return app.setSystemMessage("Please specify a key.");
+      if (key === "port") return app.setSystemMessage(`Access to 'port' is restricted.`);
+      app.setSystemMessage(`${state[key as keyof typeof state] ?? ""}`);
     }
 
     else if (cmd === "set") {
       const key = String(args[0]);
-      if (key === "port") return setLogMessage(`'port' cannot be modified.`);
+      if (key === "port") return app.setSystemMessage(`'port' cannot be modified.`);
       const value = args.slice(1).join(" ");
-      const updatedState = await app.set({ [key]: value });
+      const updatedState = await app.setState({ [key]: value });
       if (updatedState) {
         setState({ ...updatedState });
       } else {
         await refresh();
       }
-      setLogMessage(`set ${key}: ${value}`);
+      app.setSystemMessage(`set ${key}: ${value}`);
     }
 
     else if (cmd === "call" || cmd?.endsWith("()")) {
       const fn = cmd === "call" ? args[0] : cmd.slice(0, -2);
-      if (!fn) return setLogMessage("Please specify a function to call.");
+      if (!fn) return app.setSystemMessage("Please specify a function to call.");
       try {
         const isRunning = await app.probe();
         const result = isRunning
@@ -103,14 +95,14 @@ export function AppCli({ app }: AppProps) {
           : await (app as any)[fn]();
         const output = isRunning ? result.result : result;
         await refresh();
-        setLogMessage(typeof output === "string" ? output : JSON.stringify(output, null, 2));
+        app.setSystemMessage(typeof output === "string" ? output : JSON.stringify(output, null, 2));
       } catch (e: any) {
-        setLogMessage(`Error: ${e.message}`);
+        app.setSystemMessage(`Error: ${e.message}`);
       }
     }
 
     else {
-      setLogMessage(`Unknown command: ${command}`);
+      app.setSystemMessage(`Unknown command: ${command}`);
     }
 
     setHistory((prev) => [...prev, command]);
@@ -155,14 +147,14 @@ export function AppCli({ app }: AppProps) {
   }
 
   useInput((input, key) => {
-    if (key.upArrow && history.length) {
+    if (key.upArrow && history.length > 0) {
       setHistoryIndex((prev) => {
-        const newIndex = prev === null ? history.length - 1 : Math.max(0, prev - 1);
+        const newIndex = prev === null ? history.length - 1 : Math.max(prev - 1, 0);
         setInputValue(history[newIndex] || "");
         return newIndex;
       });
     }
-    if (key.downArrow && history.length) {
+    if (key.downArrow && history.length > 0) {
       setHistoryIndex((prev) => {
         if (prev === null) return null;
         const newIndex = prev + 1;
@@ -174,17 +166,50 @@ export function AppCli({ app }: AppProps) {
         return newIndex;
       });
     }
+
+    // Clear historyIndex when the user types normally
+    if (!key.upArrow && !key.downArrow && input && input.length === 1) {
+      setHistoryIndex(null);
+    }
   });
+
+
+  function formatValue(val: any, depth = 1): string {
+    const indent = "  ".repeat(depth);
+    const outerIndent = "  ".repeat(Math.max(depth - 1, 0));
+
+    if (val === null) return "null";
+    if (typeof val === "undefined") return "undefined";
+    if (typeof val !== "object") return String(val);
+    if (Array.isArray(val)) {
+      if (val.length === 0) return "[]";
+      return `[\n${val.map((v) => indent + formatValue(v, depth + 1)).join(",\n")}\n${outerIndent}]`;
+    }
+
+    const entries = Object.entries(val);
+    if (entries.length === 0) return "{}";
+
+    return `{\n${entries
+      .map(([k, v]) => `${indent}${k}: ${formatValue(v, depth + 1)}`)
+      .join("\n")}\n${outerIndent}}`;
+  }
+
+
 
   return (
     <Box flexDirection="column" paddingLeft={2}>
+      <Box flexDirection="column-reverse">
+        {app.systemLog.slice(-10).reverse().map((msg, idx) => (
+          <Text key={idx} color="gray">{msg}</Text>
+        ))}
+      </Box>
+
       <Text>
         <Text color="cyan" bold>{className}</Text>
         <Text color="gray"> (port {app.port})</Text>
         {isSynced && !app.isServerInstance && <Text color="red"> (Remote)</Text>}
       </Text>
 
-      {/* Conditionally show Variables */}
       {Object.keys(state).some((key) => key !== "port" && key !== "isServerInstance") && (
         <>
           <Text bold>Variables:</Text>
@@ -192,18 +217,20 @@ export function AppCli({ app }: AppProps) {
             {Object.entries(state)
               .filter(([key]) => key !== "port" && key !== "isServerInstance")
               .map(([key, val]) => (
-                <Text key={key}>
-                  <Text color="gray">{key.padEnd(12)}</Text>
-                  <Text color={val === "…" ? "gray" : "white"} italic={val === "…"}>
-                    {String(val)}
+                <Box key={key} flexDirection="column">
+                  <Text>
+                    <Text color="gray">{key.padEnd(18)}</Text>
                   </Text>
-                </Text>
+                  <Box paddingLeft={2}>
+                    <Text color="white">{formatValue(val)}</Text>
+                  </Box>
+                </Box>
               ))}
           </Box>
+
         </>
       )}
 
-      {/* Conditionally show Functions */}
       {functionNames.length > 0 && (
         <>
           <Text bold>Functions:</Text>
@@ -218,7 +245,7 @@ export function AppCli({ app }: AppProps) {
       )}
 
       <Box paddingTop={1}>
-        <Text color="white"> {logMessage}</Text>
+        <Text color="white"> {app.systemMessage}</Text>
       </Box>
 
       <Box>
@@ -236,5 +263,4 @@ export function AppCli({ app }: AppProps) {
       </Box>
     </Box>
   );
-
 }
