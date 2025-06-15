@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Box, Text, useApp, useInput, } from "ink";
+import { Box, Text, useApp, useInput, useStdout } from "ink";
 import TextInput from "ink-text-input";
 import type { DynamicServerApp } from "./app";
 
@@ -81,21 +81,37 @@ export function AppCli({ app }: AppProps) {
       app.setSystemMessage(`set ${key}: ${value}`);
     }
 
-    else if (cmd === "call" || cmd?.endsWith("()")) {
-      const fn = cmd === "call" ? args[0] : cmd.slice(0, -2);
-      if (!fn) return app.setSystemMessage("Please specify a function to call.");
+    else if (
+      cmd === "call" ||
+      (typeof cmd === "string" && (functionNames.includes(cmd) || cmd.endsWith("()")))
+    ) {
+      const fn = cmd === "call" ? args[0] : cmd.replace(/\(\)$/, "");
+      if (!fn || typeof (app as any)[fn] !== "function") {
+        return app.setSystemMessage(`Unknown function: ${fn}`);
+      }
+
+      // Combine all remaining args into one string (single parameter)
+      const fnArgs = cmd === "call"
+        ? [args.slice(1).join(" ")]
+        : [args.join(" ")];
+
       try {
         const isRunning = await app.probe();
         const result = isRunning
           ? await fetch(`http://localhost:${app.port}/${fn}`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify([]),
+            body: JSON.stringify(fnArgs),
           }).then((r) => r.json())
-          : await (app as any)[fn]();
+          : await (app as any)[fn](...fnArgs);
+
         const output = isRunning ? result.result : result;
         await refresh();
-        app.setSystemMessage(typeof output === "string" ? output : JSON.stringify(output, null, 2));
+        app.setSystemMessage(
+          typeof output === "string"
+            ? output
+            : JSON.stringify(output, null, 2)
+        );
       } catch (e: any) {
         app.setSystemMessage(`Error: ${e.message}`);
       }
