@@ -1,22 +1,53 @@
-# Dynamic Server App
+# Dynamic Server App Template
 
-**One class. Multiple interfaces.** Write your logic once, get HTTP API, CLI, and interactive UI automatically.
+**A TypeScript class that becomes a web API, CLI tool, and debugger.**
 
-Built on Bun. Powered by TypeScript. Zero configuration.
+Write your methods once. Use them everywhere.
 
-## Quick Start
+Built on Bun. TypeScript. Zero config.
 
+## How to Use This Template
+
+### 1. Get Started
 ```bash
-# 1. Get the template
 git clone <repo> my-app
 cd my-app
-
-# 2. Edit your class
-# Add methods to src/SampleClass.ts
-
-# 3. Run
-bun run start
+bun install
 ```
+
+### 2. Edit Your Class
+Open `src/SampleClass.ts` and add your methods:
+
+```typescript
+export class SampleClass extends DynamicServerApp<SampleState> {
+  port = 3000;
+  message = "Hello, world!";
+  
+  // Add your methods here
+  async greet(name: string) {
+    return `Hello, ${name}!`;
+  }
+  
+  async getTime() {
+    return new Date().toISOString();
+  }
+}
+```
+
+### 3. Run Your App
+```bash
+# Run with interactive UI
+bun run start
+
+# Or start as a server
+bun run start --serve
+```
+
+### 4. Use Your Methods
+Your methods are now available as:
+- **CLI commands**: `bun run start call greet "Alice"`
+- **HTTP endpoints**: `POST http://localhost:3000/greet`
+- **Interactive UI**: Type `greet "Bob"` in the terminal
 
 ## How It Works
 
@@ -24,7 +55,7 @@ bun run start
 class MyApp extends DynamicServerApp<MyState> {
   port = 3000;
   message = "Hello, world!";
-  
+
   async greet(name: string) {
     return `${this.message}, ${name}!`;
   }
