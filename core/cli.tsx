@@ -34,10 +34,12 @@ export function AppCli({ app }: AppProps) {
   useEffect(() => {
     let interval: NodeJS.Timeout;
     const initialize = async () => {
-      const schemaKeys = Object.keys(app.schema.shape);
+      // Get keys from current state instead of schema
+      const currentState = app.getState();
+      const stateKeys = Object.keys(currentState);
       setState((prev) => {
         const placeholder: Record<string, any> = {};
-        for (const key of schemaKeys) {
+        for (const key of stateKeys) {
           placeholder[key] = prev[key] ?? "";
         }
         return placeholder;

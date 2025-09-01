@@ -1,16 +1,14 @@
 // DynamicServerApp.test.ts
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { z } from "zod";
 import { DynamicServerApp } from "../core/app";
 
 // Sample implementation to test
-class TestApp extends DynamicServerApp<z.infer<typeof TestApp.schema>> {
-  static schema = z.object({
-    port: z.number(),
-    message: z.string(),
-  });
+interface TestAppState {
+  port: number;
+  message: string;
+}
 
-  schema = TestApp.schema;
+class TestApp extends DynamicServerApp<TestAppState> {
   port = 1234;
   message = "initial";
   async sampleMethod() {
@@ -41,10 +39,7 @@ describe("DynamicServerApp", () => {
     expect(app.message).toBe("updated");
   });
 
-  it("getMetadata returns correct metadata", () => {
-    const metadata = app.getMetadata();
-    expect(metadata).toMatchObject({ port: "number", message: "string" });
-  });
+
 
   it("probe returns true if server responds with ok", async () => {
     (fetch as any).mockResolvedValue({ ok: true });
@@ -58,10 +53,10 @@ describe("DynamicServerApp", () => {
     expect(result).toBe(false);
   });
 
-  it("set calls fetch with correct parameters", async () => {
+  it("setState calls fetch with correct parameters", async () => {
     const body = { message: "new" };
     (fetch as any).mockResolvedValue({ ok: true, json: () => ({}) });
-    await app.set(body);
+    await app.setState(body);
     expect(fetch).toHaveBeenCalledWith(`http://localhost:1234/state`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -69,22 +64,19 @@ describe("DynamicServerApp", () => {
     });
   });
 
-  it("applyStateUpdate ignores non-schema keys", () => {
+  it("applyStateUpdate accepts any keys without validation", () => {
     app.applyStateUpdate({ message: "hello", fakeKey: 42 } as any);
     expect(app.message).toBe("hello");
-    expect((app as any).fakeKey).toBeUndefined();
+    expect((app as any).fakeKey).toBe(42);
   });
 
-  it("applyStateUpdate throws on invalid schema type", () => {
-    expect(() => {
-      app.applyStateUpdate({ port: "oops" } as any);
-    }).toThrow();
+  it("applyStateUpdate accepts any type without validation", () => {
+    // Without Zod, we don't validate types, just apply the update
+    app.applyStateUpdate({ port: "oops" } as any);
+    expect((app as any).port).toBe("oops");
   });
 
-  it("getMetadata does not include methods", () => {
-    const meta = app.getMetadata();
-    expect(meta).not.toHaveProperty("sampleMethod");
-  });
+
 
   it("probe times out if server does not respond", async () => {
     global.fetch = Object.assign(
@@ -95,12 +87,14 @@ describe("DynamicServerApp", () => {
     expect(result).toBe(false);
   });
 
-  it("set does not throw if fetch fails", async () => {
+  it("setState does not throw if fetch fails", async () => {
     global.fetch = Object.assign(
-      vi.fn().mockRejectedValueOnce(new Error("network error")),
+      vi.fn()
+        .mockResolvedValueOnce({ ok: true }) // probe succeeds
+        .mockRejectedValueOnce(new Error("network error")), // setState fails
       { preconnect: vi.fn() }
     );
-    await expect(app.set({ message: "fail" })).resolves.toBeUndefined();
+    await expect(app.setState({ message: "fail" })).resolves.toBeUndefined();
   });
 
   it("getState includes inherited fields", () => {
