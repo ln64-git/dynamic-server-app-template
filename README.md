@@ -1,131 +1,242 @@
-# 🧙‍♂️ Dynamic Server App Template
+# Dynamic Server App
 
-A powerful, type-safe dynamic server framework built on **Bun**. Extend this abstract class to build highly customizable backend apps with introspectable state, CLI control, and auto-routed HTTP methods.
+**One class. Multiple interfaces.** Write your logic once, get HTTP API, CLI, and interactive UI automatically.
 
-## ✨ Features
+Built on Bun. Powered by TypeScript. Zero configuration.
 
-- 🧠 State introspection & dynamic updates
-- 🛡️ Type-safe state management
-- ⚙️ Built-in HTTP JSON API (`/state`, `/method`)
-- 🧪 Probes for live server detection
-- 📟 CLI flags to get/set server state directly
-- 🧬 Auto-routing of class methods as endpoints
+## Quick Start
 
-## 📦 Tech Stack
-
-- [Bun](https://bun.sh)
-
-## 🔧 Usage
-
-### 1. Extend the `DynamicServerApp`
-
-```ts
-import { DynamicServerApp } from "../core/app";
-
-export interface SampleState {
-  port: number;
-}
-
-export class SampleClass extends DynamicServerApp<SampleState> {
-  port = 2000;
-  message = "Hello, world!";
-
-  async defaultFunction(): Promise<string> {
-    return this.message + " from defaultFunction";
-  }
-
-  async sampleFunction(): Promise<void> {
-    console.log(this.message);
-  }
-}
-````
-
-### 2. Run the App
-
-```ts
-import { runDynamicApp } from "./app";
-import { SampleClass } from "./SampleClass";
-
-runDynamicApp(new SampleClass());
-```
-
-## 🖥️ API Endpoints
-
-| Endpoint         | Method | Description                            |
-| ---------------- | ------ | -------------------------------------- |
-| `/state`         | GET    | Fetch current application state        |
-| `/state`         | POST   | Update application state via JSON      |
-| `/<method-name>` | POST   | Auto-exposed instance methods via path |
-
-## 🧪 CLI Flags
-
-| Flag          | Description                     |
-| ------------- | ------------------------------- |
-| `--serve`     | Start interactive server UI     |
-| `--notify`    | Enable desktop notifications     |
-| `--port N`    | Use specific port number        |
-
-## 🚀 Server Lifecycle
-
-1. **Default behavior**: 
-   - If a `defaultFunction` exists, it runs automatically and exits
-   - If no `defaultFunction` exists, shows interactive UI
-2. **Commands**: `get`, `set`, `call` execute and return output directly
-3. **UI Commands**: `cli` shows interactive UI
-4. **Help Commands**: `help`, `--help` show help information
-5. **With `--serve` flag**: Starts server and shows interactive UI
-6. Auto-routes all non-constructor methods as POST endpoints when server is running
-
-## 🧠 Method Routing Example
-
-```ts
-// Call this remotely:
-await fetch('/sampleFunction', { method: 'POST' });
-```
-
-## 📚 Schema Validation
-
-All state changes and updates are type-checked using TypeScript interfaces. Automatically supports partial updates.
-
-## 🧙‍♂️ CLI to State
-
-CLI state parsing supports dynamic mutation via `--key value` syntax. Use `-get` to fetch specific keys, `-set` to apply.
-
-## 🛠️ Usage Examples
-
-**Command-line usage:**
 ```bash
-# Run defaultFunction (if it exists), otherwise show UI
+# 1. Get the template
+git clone <repo> my-app
+cd my-app
+
+# 2. Edit your class
+# Add methods to src/SampleClass.ts
+
+# 3. Run
+bun run start
+```
+
+## How It Works
+
+```typescript
+class MyApp extends DynamicServerApp<MyState> {
+  port = 3000;
+  message = "Hello, world!";
+  
+  async greet(name: string) {
+    return `${this.message}, ${name}!`;
+  }
+}
+```
+
+**You now have:**
+- `POST /greet` - HTTP endpoint
+- `bun run start call greet "Alice"` - CLI command
+- Interactive UI showing state and methods
+
+## Commands
+
+### Basic Usage
+```bash
+# Run default function (if exists)
 bun run start
 
 # Show interactive UI
 bun run start cli
-bun run start help
+
+# Help
 bun run start --help
-
-# Get a value
-bun run start get message
-
-# Set a value  
-bun run start set message "Hello World"
-
-# Call a function
-bun run start call sampleFunction
-
-# Start server and show interactive UI
-bun run start --serve
 ```
 
-**Development:**
+### State Management
 ```bash
-bun run start
+# Get state values
+bun run start get message
+bun run start get port
+
+# Set state values
+bun run start set message "New value"
+bun run start set counter 42
 ```
 
-## 🔐 Type Safety
+### Method Calls
+```bash
+# Call methods with arguments
+bun run start call greet "Alice"
+bun run start call processData "file.json"
+bun run start call build --serve
+```
 
-Powered by TypeScript interfaces — state and routes are always strictly typed.
+### Server Mode
+```bash
+# Start server with interactive UI
+bun run start --serve
 
-## 🧩 Extensibility
+# Use specific port
+bun run start --serve --port 3001
 
-* Add any methods → automatically exposed as API routes.
-* Add more fields to the TypeScript interface → instantly supported in state.
+# Enable desktop notifications
+bun run start --serve --notify
+```
+
+### Direct Method Calls
+```bash
+# Call methods directly (if they exist)
+bun run start greet "Bob"
+bun run start build
+bun run start watch
+```
+
+## Interactive UI Features
+
+When you run `bun run start cli` or `bun run start --serve`, you get:
+
+- **Real-time state display** - See all your variables and their values
+- **Method list** - All available functions with syntax highlighting
+- **Command history** - Use arrow keys to navigate previous commands
+- **Live updates** - State changes reflect immediately
+- **Server status** - Shows if connected to remote server
+- **System messages** - Recent activity and results
+
+### UI Commands
+```bash
+# In the interactive UI:
+get message          # Get a state value
+set counter 42       # Set a state value
+call greet "Alice"   # Call a method
+greet "Bob"          # Direct method call
+exit                 # Exit the UI
+```
+
+## Examples
+
+### Chat Bot
+```typescript
+class ChatBot extends DynamicServerApp<ChatState> {
+  port = 3000;
+  conversations = new Map<string, Message[]>();
+  
+  async sendMessage(conversationId: string, text: string) {
+    const message = { id: Date.now(), text, timestamp: new Date() };
+    this.conversations.get(conversationId)?.push(message);
+    return message;
+  }
+  
+  async getHistory(conversationId: string) {
+    return this.conversations.get(conversationId) || [];
+  }
+}
+```
+
+### Build System
+```typescript
+class BuildSystem extends DynamicServerApp<BuildState> {
+  port = 3000;
+  isBuilding = false;
+  lastBuildTime = null;
+  
+  async build() {
+    this.isBuilding = true;
+    // Your build logic
+    this.lastBuildTime = new Date();
+    this.isBuilding = false;
+    return "Build complete!";
+  }
+  
+  async watch() {
+    // Start file watcher
+    return "Watching for changes...";
+  }
+}
+```
+
+### Data Processor
+```typescript
+class DataProcessor extends DynamicServerApp<ProcessorState> {
+  port = 3000;
+  queue = [];
+  processing = false;
+  
+  async addJob(data: any) {
+    this.queue.push({ id: Date.now(), data, status: 'pending' });
+    return `Job ${this.queue.length} queued`;
+  }
+  
+  async processQueue() {
+    this.processing = true;
+    // Process all pending jobs
+    this.processing = false;
+    return `Processed ${this.queue.length} jobs`;
+  }
+}
+```
+
+## API Endpoints
+
+When running with `--serve`, your app automatically exposes:
+
+- `GET /state` - Get current state
+- `POST /state` - Update state  
+- `POST /<method-name>` - Call any method
+
+### HTTP Examples
+```bash
+# Get state
+curl http://localhost:3000/state
+
+# Update state
+curl -X POST http://localhost:3000/state \
+  -H "Content-Type: application/json" \
+  -d '{"message": "Hello from API"}'
+
+# Call method
+curl -X POST http://localhost:3000/greet \
+  -H "Content-Type: application/json" \
+  -d '["Alice"]'
+```
+
+## Advanced Features
+
+### Default Function
+```typescript
+class MyApp extends DynamicServerApp<MyState> {
+  port = 3000;
+  
+  // This runs automatically with: bun run start
+  async defaultFunction() {
+    return "Hello from default function!";
+  }
+}
+```
+
+### State Management
+```typescript
+class MyApp extends DynamicServerApp<MyState> {
+  port = 3000;
+  counter = 0;
+  users = [];
+  
+  async increment() {
+    this.counter++;
+    return this.counter;
+  }
+  
+  async addUser(name: string) {
+    this.users.push({ id: Date.now(), name });
+    return this.users;
+  }
+}
+```
+
+### Server Detection
+The framework automatically detects if a server is running and routes commands appropriately:
+- If server is running: Commands go to the server
+- If server is not running: Commands execute locally
+
+## That's It
+
+Your class becomes a complete application ecosystem. No routing. No middleware. No configuration.
+
+Just write your logic and run.
