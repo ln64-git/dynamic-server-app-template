@@ -4,6 +4,11 @@ import { exec } from "child_process";
 import net from "net";
 import http from "http";
 
+// Utility type to extract state from class properties
+export type ExtractState<T> = {
+  [K in keyof T as T[K] extends Function ? never : K]: T[K];
+};
+
 export abstract class DynamicServerApp<T extends Record<string, any>> {
   abstract port: number;
 

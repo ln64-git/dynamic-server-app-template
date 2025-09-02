@@ -1,17 +1,10 @@
-import { DynamicServerApp } from "../core/app";
+import { DynamicServerApp, type ExtractState, } from "../core/app";
 
-export interface SampleState {
-  port: number;
-  message: string;
-}
-
-export class SampleClass extends DynamicServerApp<SampleState> {
+export class SampleClass extends DynamicServerApp<ExtractState<SampleClass>> {
   port = 2000;
-
   message = "Hello, world!";
 
   async defaultFunction(): Promise<string> {
     return (this.message + " called from defaultFunction");
   }
-
 }

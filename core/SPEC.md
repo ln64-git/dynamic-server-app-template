@@ -10,6 +10,11 @@ This document provides a comprehensive specification for AI assistants to scaffo
 
 ```typescript
 // core/app.ts
+// Utility type to extract state from class properties
+export type ExtractState<T> = {
+  [K in keyof T as T[K] extends Function ? never : K]: T[K];
+};
+
 export abstract class DynamicServerApp<T extends Record<string, any>> {
   abstract port: number;
   isServerInstance = false;
@@ -27,12 +32,49 @@ export abstract class DynamicServerApp<T extends Record<string, any>> {
 
 ### 2. State Management
 
-- **Type Safety**: Uses TypeScript interfaces for state definition
+- **Type Safety**: Uses TypeScript utility types for automatic state extraction
 - **Dynamic Updates**: State can be updated via HTTP API or CLI
 - **Introspection**: Current state is always accessible via `/state` endpoint
 - **Validation**: Simple property existence checking (no runtime type validation)
+- **Auto-extraction**: State type is automatically derived from class properties using `ExtractState<T>`
 
-### 3. HTTP Server Features
+### 3. ExtractState Utility Type
+
+The `ExtractState<T>` utility type automatically extracts state properties from your class, eliminating the need to manually define state interfaces:
+
+```typescript
+// Before: Manual interface definition
+interface MyAppState {
+  port: number;
+  message: string;
+  counter: number;
+}
+
+class MyApp extends DynamicServerApp<MyAppState> {
+  port = 3000;
+  message = "Hello";
+  counter = 0;
+  // Duplicate property definitions above
+}
+
+// After: Automatic state extraction
+class MyApp extends DynamicServerApp<ExtractState<MyApp>> {
+  port = 3000;
+  message = "Hello";
+  counter = 0;
+  // Properties automatically become part of state
+  // Methods are automatically excluded
+}
+```
+
+**Benefits:**
+- ✅ **No duplication**: Define properties once in your class
+- ✅ **Type safety**: Full TypeScript type checking maintained
+- ✅ **Automatic**: New properties automatically included in state
+- ✅ **Function filtering**: Methods automatically excluded from state
+- ✅ **Maintainable**: No need to keep interfaces in sync with class properties
+
+### 4. HTTP Server Features
 
 - **Auto-routing**: All non-constructor methods become POST endpoints
 - **State Endpoint**: `GET /state` returns current state, `POST /state` updates state
@@ -210,7 +252,25 @@ project/
 
 ## Key Implementation Details
 
-### 1. State Management
+### 1. State Type Extraction
+```typescript
+// Utility type to automatically extract state from class properties
+export type ExtractState<T> = {
+  [K in keyof T as T[K] extends Function ? never : K]: T[K];
+};
+
+// Usage in your class:
+class MyApp extends DynamicServerApp<ExtractState<MyApp>> {
+  port = 3000;
+  message = "Hello";
+  counter = 0;
+  
+  // Methods are automatically excluded from state
+  async myMethod() { return "result"; }
+}
+```
+
+### 2. State Management
 ```typescript
 // Get state by iterating through instance properties
 getState(): Partial<T> {
@@ -227,7 +287,7 @@ getState(): Partial<T> {
 }
 ```
 
-### 2. HTTP Server Setup
+### 3. HTTP Server Setup
 ```typescript
 // Create HTTP server with auto-routing
 const server = http.createServer(async (req, res) => {
@@ -245,7 +305,7 @@ const server = http.createServer(async (req, res) => {
 });
 ```
 
-### 3. CLI Command Handling
+### 4. CLI Command Handling
 ```typescript
 // Parse and execute commands
 if (command === "get" && key) {
@@ -339,13 +399,20 @@ if (command === "set" && key && value) {
 - Keep framework code separate from application code
 - Use TypeScript for type safety
 - Implement proper error boundaries
+- Use `ExtractState<T>` utility type to avoid manual state interface definitions
 
-### 2. Testing
+### 2. State Management Best Practices
+- Define properties directly in your class - no need for separate interfaces
+- Use `ExtractState<YourClass>` as the generic type parameter
+- Methods are automatically excluded from state
+- Add new properties to your class and they're automatically included in state
+
+### 3. Testing
 - Write tests for all public methods
 - Use descriptive test names
 - Mock external dependencies
 
-### 3. Documentation
+### 4. Documentation
 - Keep README up to date
 - Document all public APIs
 - Provide usage examples
