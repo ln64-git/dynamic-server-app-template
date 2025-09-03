@@ -1,6 +1,6 @@
 # Dynamic Server App Template
 
-**A TypeScript class that becomes a web API, CLI tool, and debugger.**
+**A TypeScript class that becomes a web API and server.**
 
 Write your methods once. Use them everywhere.
 
@@ -36,7 +36,7 @@ export class SampleClass extends DynamicServerApp<SampleState> {
 
 ### 3. Run Your App
 ```bash
-# Run with interactive UI
+# Run default function
 bun run start
 
 # Or start as a server
@@ -45,9 +45,8 @@ bun run start --serve
 
 ### 4. Use Your Methods
 Your methods are now available as:
-- **CLI commands**: `bun run start call greet "Alice"`
 - **HTTP endpoints**: `POST http://localhost:3000/greet`
-- **Interactive UI**: Type `greet "Bob"` in the terminal
+- **Default function**: Runs automatically when you start the app
 
 ## How It Works
 
@@ -64,8 +63,7 @@ class MyApp extends DynamicServerApp<MyState> {
 
 **You now have:**
 - `POST /greet` - HTTP endpoint
-- `bun run start call greet "Alice"` - CLI command
-- Interactive UI showing state and methods
+- Default function that runs automatically
 
 ## Commands
 
@@ -74,35 +72,13 @@ class MyApp extends DynamicServerApp<MyState> {
 # Run default function (if exists)
 bun run start
 
-# Show interactive UI
-bun run start cli
-
-# Help
-bun run start --help
-```
-
-### State Management
-```bash
-# Get state values
-bun run start get message
-bun run start get port
-
-# Set state values
-bun run start set message "New value"
-bun run start set counter 42
-```
-
-### Method Calls
-```bash
-# Call methods with arguments
-bun run start call greet "Alice"
-bun run start call processData "file.json"
-bun run start call build --serve
+# Start server mode
+bun run start --serve
 ```
 
 ### Server Mode
 ```bash
-# Start server with interactive UI
+# Start server
 bun run start --serve
 
 # Use specific port
@@ -112,34 +88,7 @@ bun run start --serve --port 3001
 bun run start --serve --notify
 ```
 
-### Direct Method Calls
-```bash
-# Call methods directly (if they exist)
-bun run start greet "Bob"
-bun run start build
-bun run start watch
-```
 
-## Interactive UI Features
-
-When you run `bun run start cli` or `bun run start --serve`, you get:
-
-- **Real-time state display** - See all your variables and their values
-- **Method list** - All available functions with syntax highlighting
-- **Command history** - Use arrow keys to navigate previous commands
-- **Live updates** - State changes reflect immediately
-- **Server status** - Shows if connected to remote server
-- **System messages** - Recent activity and results
-
-### UI Commands
-```bash
-# In the interactive UI:
-get message          # Get a state value
-set counter 42       # Set a state value
-call greet "Alice"   # Call a method
-greet "Bob"          # Direct method call
-exit                 # Exit the UI
-```
 
 ## Examples
 

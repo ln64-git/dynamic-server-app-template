@@ -13,18 +13,6 @@ export abstract class DynamicServerApp<T extends Record<string, any>> {
   abstract port: number;
 
   isServerInstance = false;
-  systemMessage: string | null = null;
-  systemLog: string[] = [];
-
-  setSystemMessage(msg: string) {
-    this.systemMessage = msg;
-    this.systemLog.push(msg);
-    if (this.systemLog.length > 100) this.systemLog.shift();
-    if ((this as any).notifyEnabled && msg.includes("✅")) {
-      sendNotification("System Update", msg);
-    }
-  }
-
 
   public getState(): Partial<T> {
     const state: Partial<T> = {};
@@ -32,9 +20,7 @@ export abstract class DynamicServerApp<T extends Record<string, any>> {
       "schema",
       "logToUI",
       "notifyEnabled",
-      "isServerInstance",
-      "systemMessage",
-      "systemLog"
+      "isServerInstance"
     ]);
 
     for (const key of Object.keys(this)) {
@@ -100,110 +86,52 @@ export abstract class DynamicServerApp<T extends Record<string, any>> {
 export async function runDynamicApp<T extends Record<string, any>>(
   app: DynamicServerApp<T>
 ): Promise<void> {
-  const { command, key, value, serve, notify, port } = cliToState(
-    app.getState() as T
-  );
-  if (port) app.port = port; // <- this is required
+  const { serve, notify, port } = cliToState(app.getState() as T);
+  if (port) app.port = port;
   (app as any).notifyEnabled = notify;
+
+  // Check if there's already a server running on this port (only if port was explicitly set)
+  let isServerRunning = false;
+  if (port) {
+    isServerRunning = await app.probe();
+    if (isServerRunning && !serve) {
+      console.log(`🔹 Connected to existing server on port ${app.port}`);
+    } else if (!isServerRunning && !serve) {
+      console.log(`🔸 Server not found on port ${app.port}`);
+    }
+  }
+
 
   const handleResult = (res: any) => {
     if (res !== undefined) {
-      // Always output results unless we're in serve mode
-      if (!serve) console.log(res);
-      if (notify) sendNotification("✅ App Finished", `Port ${app.port}`);
-      if (typeof res === "string") app.setSystemMessage(res);
+      console.log(res);
+      if (notify) sendNotification("🔹 App Finished", `Port ${app.port}`);
     }
   };
 
-  // ── get ────────────────────────────────────────────────────────────────
-  if (command === "get" && key) {
-    const isRunning = await app.probe();
-    const state = isRunning
-      ? await fetch(`http://localhost:${app.port}/state`).then(r => r.json())
-      : app.getState();
-    handleResult((state as T)[key as keyof T]);
-    process.exit(0);
-  }
-
-  // ── set ────────────────────────────────────────────────────────────────
-  if (command === "set" && key && value !== undefined) {
-    const newState = await app.setState({ [key]: value } as Partial<T>);
-    handleResult(newState?.[key as keyof T]);
-    process.exit(0);
-  }
-
-  // ── call ───────────────────────────────────────────────────────────────
-  if (command === "call" && key) {
-    const argsIndex = process.argv.indexOf(key) + 1;
-    const args = [process.argv.slice(argsIndex).filter(arg => !arg.startsWith("--")).join(" ")];
-
-    const isRunning = await app.probe();
-
-    if (isRunning) {
-      const res = await fetch(`http://localhost:${app.port}/${key}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(args), // ✅ Send real arguments
-      }).then(r => r.json());
-
-      handleResult((res as { result?: any }).result);
-      process.exit(0);
-    }
-
-    // fallback: call function locally if server is not running
-    if (!isRunning) {
-      try {
-        const res = await (app as any)[key](...(Array.isArray(args) ? args : []));
-        handleResult(res);
-        process.exit(0);
-      } catch (err: any) {
-        console.error(`Error calling function ${key}:`, err.message);
-        process.exit(1);
-      }
-    }
-
-    return;
-  }
-
-  // ── help commands ──────────────────────────────────────────────────────────
-  if (command === "help") {
-    showHelp();
-    process.exit(0);
-  }
-
-  // ── cli command ────────────────────────────────────────────────────────────
-  if (command === "cli") {
-    // This command should show the UI, so we return without doing anything
-    // The main.tsx will handle showing the UI
-    return;
-  }
-
   // ── serve command ──────────────────────────────────────────────────────────
   if (serve) {
-    // Start server and then show CLI
+    if (isServerRunning) console.log(`🔸  Server already running on port ${app.port}. Starting on next available port...`);
     await startServer(app, {
       port: app.port,
       routes: buildRoutes(app),
     });
-    // Don't exit here, let main.tsx handle showing the UI
     return;
   }
 
   // ── default function ──────────────────────────────────────────────────────
-  // If no command provided and not in serve mode, try to run defaultFunction
-  if (!command && !serve) {
-    if (typeof (app as any).defaultFunction === "function") {
-      try {
-        const res = await (app as any).defaultFunction();
-        handleResult(res);
-        process.exit(0);
-      } catch (err: any) {
-        console.error("Error running defaultFunction:", err.message);
-        process.exit(1);
-      }
+  if (typeof (app as any).defaultFunction === "function") {
+    try {
+      const res = await (app as any).defaultFunction();
+      handleResult(res);
+      process.exit(0);
+    } catch (err: any) {
+      console.error("🔸 Error running defaultFunction:", err.message);
+      process.exit(1);
     }
-    // If no defaultFunction exists, return to show UI
-    return;
+  } else {
+    console.log("🔸 No defaultFunction found. App completed.");
+    process.exit(0);
   }
 }
 
@@ -283,42 +211,41 @@ export async function startServer<T extends Record<string, any>>(
 
   app.isServerInstance = true;
   server.listen(port, () => {
-    if ((app as any).notifyEnabled) sendNotification("🟢 Server Started", `Listening on port ${port}`);
+    console.log(`🔹 Server started on port ${port}`);
   });
+
+  // Graceful shutdown handling
+  const gracefulShutdown = (signal: string) => {
+    server.close(() => {
+      process.exit(0);
+    });
+    // Force close after 5 seconds
+    setTimeout(() => {
+      process.exit(1);
+    }, 5000);
+  };
+  process.on("SIGTERM", () => gracefulShutdown("SIGTERM"));
+  process.on("SIGINT", () => gracefulShutdown("SIGINT"));
 }
 
 export function cliToState<T extends Record<string, any>>(defaults: T): {
-  command: "get" | "set" | "call" | "cli" | "help" | null;
-  key?: string;
-  value?: string;
   serve: boolean;
   notify: boolean;
   port?: number;
 } {
   const args = process.argv.slice(2);
-  let command: "get" | "set" | "call" | "cli" | "help" | null = null;
   let serve = false;
   let notify = false;
-  let key: string | undefined;
-  let value: string | undefined;
   let port: number | undefined;
 
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
-    if (typeof arg === "string" && ["get", "set", "call", "cli", "help"].includes(arg)) {
-      command = arg as any;
-      if (["get", "set", "call"].includes(arg)) {
-        key = args[i + 1];
-        value = args[i + 2];
-      }
-    }
     if (arg === "--serve") serve = true;
     if (arg === "--notify") notify = true;
     if (arg === "--port") port = Number(args[i + 1]);
-    if (arg === "--help") command = "help";
   }
 
-  return { command, key, value, serve, notify, port };
+  return { serve, notify, port };
 }
 
 
@@ -330,38 +257,7 @@ export function sendNotification(title: string, body: string) {
   exec(`notify-send "${title}" "${body.replace(/"/g, '\\"')}"`);
 }
 
-function showHelp() {
-  console.log(`
-🧙‍♂️ Dynamic Server App
 
-USAGE:
-  bun run start [COMMAND] [OPTIONS]
-
-COMMANDS:
-  (no command)     Run defaultFunction if exists, otherwise show interactive UI
-  cli              Show interactive UI
-  help             Show this help message
-  get <key>        Get a state value
-  set <key> <val>  Set a state value
-  call <func>      Call a function
-
-OPTIONS:
-  --serve          Start server and show interactive UI
-  --notify         Enable desktop notifications
-  --port <num>     Use specific port number
-
-EXAMPLES:
-  bun run start                    # Run defaultFunction or show UI
-  bun run start cli                # Show interactive UI
-  bun run start get message        # Get message value
-  bun run start set message "Hi"   # Set message to "Hi"
-  bun run start call myFunction    # Call myFunction
-  bun run start --serve            # Start server with UI
-  bun run start --help             # Show this help
-
-For more information, visit: https://github.com/your-repo
-`);
-}
 
 async function findAvailablePort(start: number, maxAttempts = 50): Promise<number> {
   for (let port = start, i = 0; i < maxAttempts; i++, port++) {
