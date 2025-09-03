@@ -107,7 +107,7 @@ export abstract class DynamicServerApp<T extends Record<string, any>> {
     } catch (error) {
       // Only show message if file doesn't exist (ENOENT), not for other errors
       if ((error as any).code === 'ENOENT') {
-        this.logSuccess('Starting with fresh state');
+        this.logSuccess('State created at ' + this.getStateFilePath());
       }
     }
   }
@@ -256,6 +256,11 @@ export async function runDynamicApp<T extends Record<string, any>>(
   }
 
   (app as any).enableAutoSave();
+
+  // Add separator line before application output
+  if (!serve) {
+    console.log('');
+  }
 
   // Initialize development features
   if (dev) {
