@@ -13,6 +13,31 @@ export abstract class DynamicServerApp<T extends Record<string, any>> {
   abstract port: number;
 
   isServerInstance = false;
+  private stateFile = '';
+  private isDevelopment = false;
+  private logPrefix = '';
+
+  private getStateFilePath(): string {
+    return `core/.app-state-${this.port}.json`;
+  }
+
+  // Port-specific logging
+  private createLogPrefix(port: number): string {
+    return `[${port}]`;
+  }
+
+  private log(message: string, emoji = '🔹'): void {
+    const prefix = this.logPrefix || this.createLogPrefix(this.port);
+    console.log(`${prefix} ${emoji} ${message}`);
+  }
+
+  private logError(message: string): void {
+    this.log(message, '🔸');
+  }
+
+  private logSuccess(message: string): void {
+    this.log(message, '🔹');
+  }
 
   public getState(): Partial<T> {
     const state: Partial<T> = {};
@@ -20,7 +45,10 @@ export abstract class DynamicServerApp<T extends Record<string, any>> {
       "schema",
       "logToUI",
       "notifyEnabled",
-      "isServerInstance"
+      "isServerInstance",
+      "logPrefix",
+      "stateFile",
+      "isDevelopment"
     ]);
 
     for (const key of Object.keys(this)) {
@@ -47,6 +75,97 @@ export abstract class DynamicServerApp<T extends Record<string, any>> {
       if (Object.prototype.hasOwnProperty.call(this, key) || !(key in this)) {
         (this as any)[key] = value;
       }
+    });
+
+    // Add timestamp to track when state was last updated
+    (this as any).lastUpdated = new Date().toISOString();
+
+    // Auto-save state always
+    this.saveState().catch(console.error);
+  }
+
+  async saveState(): Promise<void> {
+    try {
+      const state = this.getState();
+      const stateFilePath = this.getStateFilePath();
+      await Bun.write(stateFilePath, JSON.stringify(state, null, 2));
+      if (this.isDevelopment) {
+        this.logSuccess(`State saved to ${stateFilePath}`);
+      }
+    } catch (error) {
+      this.logError(`Failed to save state: ${error}`);
+    }
+  }
+
+  async loadState(): Promise<void> {
+    try {
+      const stateFilePath = this.getStateFilePath();
+      const data = await Bun.file(stateFilePath).text();
+      const state = JSON.parse(data);
+      this.applyStateUpdate(state);
+      this.logSuccess(`State restored from ${stateFilePath}`);
+    } catch (error) {
+      // Only show message if file doesn't exist (ENOENT), not for other errors
+      if ((error as any).code === 'ENOENT') {
+        this.logSuccess('Starting with fresh state');
+      }
+    }
+  }
+
+  enableAutoSave(): void {
+    // Override property assignments to auto-save
+    const originalThis = this;
+    const stateProperties = Object.keys(this.getState());
+
+    stateProperties.forEach(prop => {
+      const descriptor = Object.getOwnPropertyDescriptor(this, prop);
+      if (descriptor && !descriptor.set) {
+        let value = (this as any)[prop];
+        Object.defineProperty(this, prop, {
+          get() { return value; },
+          set(newValue) {
+            value = newValue;
+            originalThis.saveState().catch(console.error);
+          },
+          enumerable: true,
+          configurable: true
+        });
+      }
+    });
+  }
+
+
+
+  private wrapMethod(methodName: string, method: Function) {
+    return async (...args: any[]) => {
+      const start = Date.now();
+      try {
+        const result = await method.apply(this, args);
+        const duration = Date.now() - start;
+        if (this.isDevelopment) {
+          this.logSuccess(`${methodName} completed in ${duration}ms`);
+        }
+        return result;
+      } catch (error) {
+        const duration = Date.now() - start;
+        if (this.isDevelopment) {
+          this.logError(`${methodName} failed after ${duration}ms: ${(error as Error).message}`);
+        }
+        throw error;
+      }
+    };
+  }
+
+  enableMethodInterception(): void {
+    if (!this.isDevelopment) return;
+
+    const prototype = Object.getPrototypeOf(this);
+    const methodNames = Object.getOwnPropertyNames(prototype)
+      .filter(name => name !== 'constructor' && typeof (this as any)[name] === 'function');
+
+    methodNames.forEach(methodName => {
+      const originalMethod = (this as any)[methodName];
+      (this as any)[methodName] = this.wrapMethod(methodName, originalMethod);
     });
   }
 
@@ -77,7 +196,7 @@ export abstract class DynamicServerApp<T extends Record<string, any>> {
       const response = await res.json() as { state?: Partial<T> };
       return response?.state;
     } catch (e) {
-      console.error("❌ Failed to set state:", e);
+      this.logError(`Failed to set state: ${e}`);
     }
     return undefined;
   }
@@ -86,18 +205,72 @@ export abstract class DynamicServerApp<T extends Record<string, any>> {
 export async function runDynamicApp<T extends Record<string, any>>(
   app: DynamicServerApp<T>
 ): Promise<void> {
-  const { serve, notify, port } = cliToState(app.getState() as T);
+  const { serve, notify, port, dev, view, setState, targetPort, command, property, value } = cliToState(app.getState() as T);
   if (port) app.port = port;
   (app as any).notifyEnabled = notify;
+  (app as any).isDevelopment = dev;
+
+  // Set log prefix for this instance
+  (app as any).logPrefix = `[${app.port}]`;
+
+  // Handle view flag - show functions and variables
+  if (view) {
+    showApplicationStructure(app);
+    process.exit(0);
+  }
+
+  // Handle set-state flag - set state on target port
+  if (setState && targetPort) {
+    await setStateOnPort(setState, targetPort);
+    process.exit(0);
+  }
+
+  // Handle set/get commands
+  if (command && property) {
+    const targetPortForCommand = port || targetPort || app.port;
+
+    if (command === 'set' && value !== undefined) {
+      // Parse value (try JSON first, then string)
+      let parsedValue: any = value;
+      try {
+        parsedValue = JSON.parse(value);
+      } catch {
+        // Keep as string if not valid JSON
+      }
+
+      const stateUpdate = { [property]: parsedValue } as Partial<T>;
+      await setStateOnPort(stateUpdate, targetPortForCommand);
+      process.exit(0);
+    } else if (command === 'get') {
+      await getStateFromPort(property, targetPortForCommand);
+      process.exit(0);
+    }
+  }
+
+  // Initialize auto-save and state loading
+  await (app as any).loadState();
+
+  // Set initial timestamp if not already set
+  if (!(app as any).lastUpdated) {
+    (app as any).lastUpdated = new Date().toISOString();
+  }
+
+  (app as any).enableAutoSave();
+
+  // Initialize development features
+  if (dev) {
+    (app as any).logSuccess('Development mode enabled');
+    (app as any).enableMethodInterception();
+  }
 
   // Check if there's already a server running on this port (only if port was explicitly set)
   let isServerRunning = false;
   if (port) {
     isServerRunning = await app.probe();
     if (isServerRunning && !serve) {
-      console.log(`🔹 Connected to existing server on port ${app.port}`);
+      (app as any).logSuccess(`Connected to existing server on port ${app.port}`);
     } else if (!isServerRunning && !serve) {
-      console.log(`🔸 Server not found on port ${app.port}`);
+      (app as any).logError(`Server not found on port ${app.port}`);
     }
   }
 
@@ -111,7 +284,7 @@ export async function runDynamicApp<T extends Record<string, any>>(
 
   // ── serve command ──────────────────────────────────────────────────────────
   if (serve) {
-    if (isServerRunning) console.log(`🔸  Server already running on port ${app.port}. Starting on next available port...`);
+    if (isServerRunning) (app as any).logError(`Server already running on port ${app.port}. Starting on next available port...`);
     await startServer(app, {
       port: app.port,
       routes: buildRoutes(app),
@@ -126,11 +299,11 @@ export async function runDynamicApp<T extends Record<string, any>>(
       handleResult(res);
       process.exit(0);
     } catch (err: any) {
-      console.error("🔸 Error running defaultFunction:", err.message);
+      (app as any).logError(`Error running defaultFunction: ${err.message}`);
       process.exit(1);
     }
   } else {
-    console.log("🔸 No defaultFunction found. App completed.");
+    (app as any).logError("No defaultFunction found. App completed.");
     process.exit(0);
   }
 }
@@ -139,7 +312,10 @@ function buildRoutes<T extends Record<string, any>>(app: DynamicServerApp<T>): R
   return Object.getOwnPropertyNames(Object.getPrototypeOf(app))
     .filter(k => k !== "constructor" && typeof (app as any)[k] === "function")
     .reduce((routes, key) => {
-      routes[`/${key}`] = async (app, args) => await (app as any)[key](...(Array.isArray(args) ? args : []));
+      routes[`/${key}`] = async (app, args) => {
+        // args is already an array from the server handler
+        return await (app as any)[key](...args);
+      };
       return routes;
     }, {} as Record<string, RemoteAction<T>>);
 }
@@ -188,13 +364,28 @@ export async function startServer<T extends Record<string, any>>(
       return;
     }
 
+    // Method explorer endpoint
+    if (url.pathname === "/methods") {
+      const methods = Object.getOwnPropertyNames(Object.getPrototypeOf(app))
+        .filter(k => k !== "constructor" && typeof (app as any)[k] === "function")
+        .map(methodName => ({
+          name: methodName,
+          signature: getMethodSignature(app, methodName)
+        }));
+
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ methods }));
+      return;
+    }
+
     if (method === "POST" && routes[url.pathname]) {
       let body = "";
       req.on("data", chunk => (body += chunk));
       req.on("end", async () => {
         try {
           const parsed = JSON.parse(body);
-          const result = await routes[url.pathname]!(app, parsed);
+          // Pass the parsed data as a single argument to the method
+          const result = await routes[url.pathname]!(app, [parsed]);
           res.writeHead(200, { "Content-Type": "application/json" });
           res.end(JSON.stringify({ status: "ok", result }));
         } catch (err: any) {
@@ -211,7 +402,9 @@ export async function startServer<T extends Record<string, any>>(
 
   app.isServerInstance = true;
   server.listen(port, () => {
-    console.log(`🔹 Server started on port ${port}`);
+    // Set server start timestamp
+    (app as any).serverStarted = new Date().toISOString();
+    (app as any).logSuccess(`Server started.`);
   });
 
   // Graceful shutdown handling
@@ -232,20 +425,64 @@ export function cliToState<T extends Record<string, any>>(defaults: T): {
   serve: boolean;
   notify: boolean;
   port?: number;
+  dev: boolean;
+  view: boolean;
+  setState?: Partial<T>;
+  targetPort?: number;
+  command?: 'set' | 'get';
+  property?: string;
+  value?: string;
 } {
   const args = process.argv.slice(2);
   let serve = false;
   let notify = false;
   let port: number | undefined;
+  let dev = false;
+  let view = false;
+  let setState: Partial<T> | undefined;
+  let targetPort: number | undefined;
+  let command: 'set' | 'get' | undefined;
+  let property: string | undefined;
+  let value: string | undefined;
 
+  // Parse command (set/get) and property
+  if (args.length > 0 && (args[0] === 'set' || args[0] === 'get')) {
+    command = args[0] as 'set' | 'get';
+    if (args.length > 1) {
+      property = args[1];
+      if (command === 'set' && args.length > 2) {
+        value = args[2];
+      }
+    }
+  }
+
+  // Parse flags
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
     if (arg === "--serve") serve = true;
     if (arg === "--notify") notify = true;
     if (arg === "--port") port = Number(args[i + 1]);
+    if (arg === "--dev") dev = true;
+    if (arg === "--view") view = true;
+    if (arg === "--set-state") {
+      try {
+        const stateJson = args[i + 1];
+        if (stateJson) {
+          setState = JSON.parse(stateJson);
+          i++; // Skip the JSON argument
+        }
+      } catch (e) {
+        console.error("🔸 Invalid JSON in --set-state:", e);
+        process.exit(1);
+      }
+    }
+    if (arg === "--target-port") {
+      targetPort = Number(args[i + 1]);
+      i++; // Skip the port argument
+    }
   }
 
-  return { serve, notify, port };
+  return { serve, notify, port, dev, view, setState, targetPort, command, property, value };
 }
 
 
@@ -256,6 +493,28 @@ export function diffStatePatch<T extends Record<string, any>>(cliArgs: T, curren
 export function sendNotification(title: string, body: string) {
   exec(`notify-send "${title}" "${body.replace(/"/g, '\\"')}"`);
 }
+
+function getMethodSignature(app: any, methodName: string): string {
+  const method = app[methodName];
+  if (typeof method !== 'function') return 'unknown';
+
+  // Try to get the original method from the prototype
+  const prototype = Object.getPrototypeOf(app);
+  const originalMethod = prototype[methodName];
+
+  if (originalMethod && typeof originalMethod === 'function') {
+    const source = originalMethod.toString();
+    const match = source.match(/\(([^)]*)\)/);
+    if (match) {
+      const params = match[1].trim();
+      return params ? `${methodName}(${params})` : `${methodName}()`;
+    }
+  }
+
+  return `${methodName}()`;
+}
+
+
 
 
 
@@ -270,4 +529,90 @@ async function findAvailablePort(start: number, maxAttempts = 50): Promise<numbe
     if (isFree) return port;
   }
   throw new Error(`No available ports found starting from ${start}`);
+}
+
+async function getStateFromPort(property: string, targetPort: number): Promise<void> {
+  try {
+    console.log(`🔹 Getting ${property} from port ${targetPort}...`);
+
+    // Check if server is running on target port
+    const controller = new AbortController();
+    const id = setTimeout(() => controller.abort(), 1000);
+    const res = await fetch(`http://localhost:${targetPort}/state`, { signal: controller.signal });
+    clearTimeout(id);
+
+    if (!res.ok) {
+      console.error(`🔸 Server not found on port ${targetPort}`);
+      process.exit(1);
+    }
+
+    const state = await res.json() as Record<string, any>;
+    const value = state[property];
+
+    if (value !== undefined) {
+      console.log(`🔹 ${property}: ${JSON.stringify(value)}`);
+    } else {
+      console.log(`🔸 Property '${property}' not found in state`);
+      process.exit(1);
+    }
+  } catch (error) {
+    console.error(`🔸 Error getting ${property} from port ${targetPort}:`, error);
+    process.exit(1);
+  }
+}
+
+async function setStateOnPort<T extends Record<string, any>>(stateUpdate: Partial<T>, targetPort: number): Promise<void> {
+  try {
+    console.log(`🔹 Setting state on port ${targetPort}...`);
+
+    // Check if server is running on target port
+    const controller = new AbortController();
+    const id = setTimeout(() => controller.abort(), 1000);
+    const probeRes = await fetch(`http://localhost:${targetPort}/state`, { signal: controller.signal });
+    clearTimeout(id);
+
+    if (!probeRes.ok) {
+      console.error(`🔸 Server not found on port ${targetPort}`);
+      process.exit(1);
+    }
+
+    // Set the state
+    const res = await fetch(`http://localhost:${targetPort}/state`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(stateUpdate),
+    });
+
+    if (res.ok) {
+      const response = await res.json() as { state?: Partial<T> };
+      console.log(`🔹 State updated successfully on port ${targetPort}:`);
+      console.log(JSON.stringify(response.state, null, 2));
+    } else {
+      const error = await res.json() as { error?: string };
+      console.error(`🔸 Failed to set state on port ${targetPort}:`, error.error);
+      process.exit(1);
+    }
+  } catch (error) {
+    console.error(`🔸 Error setting state on port ${targetPort}:`, error);
+    process.exit(1);
+  }
+}
+
+export function showApplicationStructure<T extends Record<string, any>>(app: DynamicServerApp<T>): void {
+  console.log('🔹 Application Structure:');
+  console.log('\n🔧 Functions:');
+  const methods = Object.getOwnPropertyNames(Object.getPrototypeOf(app))
+    .filter(k => k !== "constructor" && typeof (app as any)[k] === "function");
+  methods.forEach(methodName => {
+    const signature = getMethodSignature(app, methodName);
+    console.log(`  • ${signature}`);
+  });
+
+  console.log('\n🔹 Variables:');
+  const state = app.getState();
+  Object.entries(state).forEach(([key, value]) => {
+    const type = typeof value;
+    const preview = type === 'object' ? JSON.stringify(value).substring(0, 50) + '...' : String(value);
+    console.log(`  • ${key}: ${type} = ${preview}`);
+  });
 }

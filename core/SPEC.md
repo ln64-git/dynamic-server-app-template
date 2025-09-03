@@ -30,10 +30,13 @@ export abstract class DynamicServerApp<T extends Record<string, any>> {
 ### 2. State Management
 
 - **Type Safety**: Uses TypeScript utility types for automatic state extraction
-- **Dynamic Updates**: State can be updated via HTTP API
+- **Dynamic Updates**: State can be updated via HTTP API or CLI commands
 - **Introspection**: Current state is always accessible via `/state` endpoint
 - **Validation**: Simple property existence checking (no runtime type validation)
 - **Auto-extraction**: State type is automatically derived from class properties using `ExtractState<T>`
+- **Port-Specific State**: Each port instance has its own isolated state file
+- **Timestamps**: Automatic tracking of state changes and server startup times
+- **Clean State**: Internal implementation details are excluded from user state
 
 ### 3. ExtractState Utility Type
 
@@ -83,24 +86,60 @@ class MyApp extends DynamicServerApp<ExtractState<MyApp>> {
 ### 1. Command Structure
 
 ```bash
-bun run start [OPTIONS]
+bun run start [COMMAND] [OPTIONS]
 ```
 
-### 2. Available Options
+### 2. Available Commands
+
+| Command | Syntax | Behavior |
+|---------|--------|----------|
+| `set` | `bun run start set <property> <value> --port <number>` | Sets a property value on target port |
+| `get` | `bun run start get <property> --port <number>` | Gets a property value from target port |
+| `(no command)` | `bun run start [OPTIONS]` | Runs `defaultFunction` if exists, otherwise exits |
+
+### 3. Available Options
 
 | Option | Behavior |
 |--------|----------|
-| `(no options)` | Runs `defaultFunction` if exists, otherwise exits |
 | `--serve` | Starts HTTP server |
 | `--port <number>` | Specifies port number |
 | `--notify` | Enables desktop notifications |
+| `--dev` | Enables development mode with method interception |
+| `--view` | Shows application structure (functions and variables) |
 
-### 3. CLI Parsing Logic
+### 4. CLI Examples
+
+```bash
+# Start a server
+bun run start --serve --port 3000
+
+# Set a string value
+bun run start set message "hello world" --port 3000
+
+# Set a number value
+bun run start set port 4000 --port 3000
+
+# Set a boolean value
+bun run start set isActive true --port 3000
+
+# Get any property
+bun run start get message --port 3000
+bun run start get port --port 3000
+
+# View application structure
+bun run start --view
+
+# Run with development mode
+bun run start --serve --port 3000 --dev
+```
+
+### 5. CLI Parsing Logic
 
 ```typescript
 // Parse arguments for:
-// 1. Flags: --serve, --notify, --port
-// 2. Default behavior: run defaultFunction if exists
+// 1. Commands: set, get
+// 2. Flags: --serve, --notify, --port, --dev, --view
+// 3. Default behavior: run defaultFunction if exists
 ```
 
 ## Default Function Behavior
@@ -141,17 +180,29 @@ process.exit(0);
 
 ## Logging System
 
-### 1. Console Logging
-The framework provides comprehensive console logging with emoji indicators:
+### 1. Port-Specific Console Logging
+The framework provides comprehensive console logging with port-specific prefixes and emoji indicators:
 
-- `🔹 Starting server on port X...` - Server startup initiation
-- `🔹 Server started on port X` - Server successfully started
-- `🔹 Connected to existing server on port X` - Connected to running server
-- `🔸 Server not found on port X` - No server found on specified port
-- `🔸 Server already running on port X. Starting on next available port...` - Port conflict detected
-- `🔸 No defaultFunction found. App completed.` - No default function exists
-- `🔸 Error running defaultFunction: [error]` - Function execution error
+- `[Port XXXX] 🔹 Starting with fresh state` - Server starting with new state
+- `[Port XXXX] 🔹 State restored from core/.app-state-XXXX.json` - State loaded from file
+- `[Port XXXX] 🔹 Server started on port X` - Server successfully started
+- `[Port XXXX] 🔹 Connected to existing server on port X` - Connected to running server
+- `[Port XXXX] 🔸 Server not found on port X` - No server found on specified port
+- `[Port XXXX] 🔸 Server already running on port X. Starting on next available port...` - Port conflict detected
+- `[Port XXXX] 🔸 No defaultFunction found. App completed.` - No default function exists
+- `[Port XXXX] 🔸 Error running defaultFunction: [error]` - Function execution error
+- `[Port XXXX] 🔹 Development mode enabled` - Development features activated
+- `[Port XXXX] 🔹 State saved to core/.app-state-XXXX.json` - State auto-saved (dev mode)
 
+### 2. CLI Command Logging
+- `🔹 Setting state on port X...` - Setting state via CLI
+- `🔹 State updated successfully on port X:` - State update completed
+- `🔹 Getting <property> from port X...` - Getting state via CLI
+- `🔹 <property>: <value>` - Property value retrieved
+- `🔸 Server not found on port X` - Target server not running
+- `🔸 Property '<property>' not found in state` - Property doesn't exist
+
+### 3. Shutdown Logging
 - `🔸 Received SIGTERM. Shutting down gracefully...` - Shutdown signal received
 - `🔸 Forcing shutdown after timeout` - Forced shutdown after 5 seconds
 - `🔹 Server closed successfully` - Graceful shutdown completed
@@ -161,17 +212,39 @@ The framework provides comprehensive console logging with emoji indicators:
 ```
 project/
 ├── core/
-│   ├── app.ts          # Main framework logic
-│   ├── main.tsx        # Application entry point
-│   └── SPEC.md         # This specification
+│   ├── app.ts                    # Main framework logic
+│   ├── main.tsx                  # Application entry point
+│   ├── SPEC.md                   # This specification
+│   └── .app-state-XXXX.json      # Port-specific state files (auto-generated)
 ├── src/
-│   └── SampleClass.ts  # Example implementation
+│   └── SampleClass.ts            # Example implementation
 ├── tests/
-│   └── app.test.ts     # Test suite
-├── package.json        # Dependencies and scripts
-├── tsconfig.json       # TypeScript configuration
-└── README.md           # User documentation
+│   └── app.test.ts               # Test suite
+├── package.json                  # Dependencies and scripts
+├── tsconfig.json                 # TypeScript configuration
+└── README.md                     # User documentation
 ```
+
+### State File Management
+- **Port-Specific Files**: Each port instance creates its own state file: `core/.app-state-{port}.json`
+- **Automatic Creation**: State files are created automatically when servers start
+- **Isolated State**: Each port maintains completely separate state
+- **Clean Format**: Only user-relevant data is stored (internal fields excluded)
+- **Automatic Timestamps**: State changes are tracked with `lastUpdated` and `serverStarted` timestamps
+
+### State File Format
+```json
+{
+  "port": 3000,
+  "message": "hello world",
+  "lastUpdated": "2025-09-03T23:39:00.068Z",
+  "serverStarted": "2025-09-03T23:38:56.105Z"
+}
+```
+
+**Timestamp Fields:**
+- `serverStarted`: ISO timestamp when the server instance was started
+- `lastUpdated`: ISO timestamp when the state was last modified (updated on every state change)
 
 ## Dependencies
 
@@ -250,7 +323,10 @@ class MyApp extends DynamicServerApp<ExtractState<MyApp>> {
 // Get state by iterating through instance properties
 getState(): Partial<T> {
   const state: Partial<T> = {};
-  const exclude = new Set(["schema", "logToUI", "notifyEnabled", "isServerInstance"]);
+  const exclude = new Set([
+    "schema", "logToUI", "notifyEnabled", "isServerInstance", 
+    "logPrefix", "stateFile", "isDevelopment"
+  ]);
   
   for (const key of Object.keys(this)) {
     if (!exclude.has(key) && typeof (this as any)[key] !== "function") {
@@ -259,6 +335,21 @@ getState(): Partial<T> {
   }
   
   return state;
+}
+
+// Apply state updates with automatic timestamping
+applyStateUpdate(data: Partial<T>): void {
+  Object.entries(data).forEach(([key, value]) => {
+    if (Object.prototype.hasOwnProperty.call(this, key) || !(key in this)) {
+      (this as any)[key] = value;
+    }
+  });
+
+  // Add timestamp to track when state was last updated
+  (this as any).lastUpdated = new Date().toISOString();
+
+  // Auto-save state always
+  this.saveState().catch(console.error);
 }
 ```
 
@@ -280,17 +371,84 @@ const server = http.createServer(async (req, res) => {
 });
 ```
 
-### 4. Logging and Graceful Shutdown
+### 4. CLI Command Implementation
 ```typescript
+// Enhanced CLI parsing with set/get commands
+export function cliToState<T extends Record<string, any>>(defaults: T): {
+  serve: boolean;
+  notify: boolean;
+  port?: number;
+  dev: boolean;
+  view: boolean;
+  setState?: Partial<T>;
+  targetPort?: number;
+  command?: 'set' | 'get';
+  property?: string;
+  value?: string;
+} {
+  const args = process.argv.slice(2);
+  let command: 'set' | 'get' | undefined;
+  let property: string | undefined;
+  let value: string | undefined;
+
+  // Parse command (set/get) and property
+  if (args.length > 0 && (args[0] === 'set' || args[0] === 'get')) {
+    command = args[0] as 'set' | 'get';
+    if (args.length > 1) {
+      property = args[1];
+      if (command === 'set' && args.length > 2) {
+        value = args[2];
+      }
+    }
+  }
+  
+  // Parse flags and return complete state
+  return { serve, notify, port, dev, view, setState, targetPort, command, property, value };
+}
+
+// Set state on target port
+async function setStateOnPort<T extends Record<string, any>>(stateUpdate: Partial<T>, targetPort: number): Promise<void> {
+  const res = await fetch(`http://localhost:${targetPort}/state`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(stateUpdate),
+  });
+  
+  if (res.ok) {
+    const response = await res.json() as { state?: Partial<T> };
+    console.log(`🔹 State updated successfully on port ${targetPort}:`);
+    console.log(JSON.stringify(response.state, null, 2));
+  }
+}
+
+// Get state from target port
+async function getStateFromPort(property: string, targetPort: number): Promise<void> {
+  const res = await fetch(`http://localhost:${targetPort}/state`);
+  const state = await res.json() as Record<string, any>;
+  const value = state[property];
+  
+  if (value !== undefined) {
+    console.log(`🔹 ${property}: ${JSON.stringify(value)}`);
+  }
+}
+```
+
+### 5. Logging and Graceful Shutdown
+```typescript
+// Port-specific logging with prefixes
+private log(message: string, emoji = '🔹'): void {
+  const prefix = this.logPrefix || this.createLogPrefix(this.port);
+  console.log(`${prefix} ${emoji} ${message}`);
+}
+
 // Server startup logging
-console.log(`🚀 Starting server on port ${app.port}...`);
-console.log(`🔹 Server started on port ${port}`);
+(app as any).logSuccess(`Server started on port ${port}`);
 
 // Connection detection
 if (isServerRunning && !serve) {
-  console.log(`🔹 Connected to existing server on port ${app.port}`);
+  (app as any).logSuccess(`Connected to existing server on port ${app.port}`);
 } else if (!isServerRunning && !serve) {
-  console.log(`🔸 Server not found on port ${app.port}`);
+  (app as any).logError(`Server not found on port ${app.port}`);
 }
 
 // Graceful shutdown
