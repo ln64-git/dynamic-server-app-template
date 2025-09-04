@@ -339,8 +339,15 @@ export async function startServer<T extends Record<string, any>>(
     const url = new URL(req.url ?? "/", `http://${req.headers.host}`);
     const method = req.method ?? "GET";
 
+    // Log incoming requests (except for /state requests which are logged separately)
+    if (url.pathname !== "/state") {
+      (app as any).logSuccess(`${method} ${url.pathname} - Remote interaction`);
+    }
+
     if (url.pathname === "/state") {
       if (method === "GET") {
+        // Log state retrieval
+        (app as any).logSuccess(`State retrieval: GET /state`);
         res.writeHead(200, { "Content-Type": "application/json" });
         res.end(JSON.stringify(app.getState()));
       } else if (method === "POST") {
@@ -354,7 +361,11 @@ export async function startServer<T extends Record<string, any>>(
             for (const key in parsed) {
               if (!isEqual(parsed[key], current[key])) (patch as any)[key] = parsed[key];
             }
-            if (Object.keys(patch).length) app.applyStateUpdate(patch);
+            if (Object.keys(patch).length) {
+              // Log detailed state update
+              (app as any).logSuccess(`State update: ${JSON.stringify(patch)}`);
+              app.applyStateUpdate(patch);
+            }
             res.writeHead(200, { "Content-Type": "application/json" });
             res.end(JSON.stringify({ status: "ok", state: app.getState() }));
           } catch (err: any) {
@@ -389,11 +400,21 @@ export async function startServer<T extends Record<string, any>>(
       req.on("end", async () => {
         try {
           const parsed = JSON.parse(body);
+          const methodName = url.pathname.substring(1); // Remove leading slash
+
+          // Log method call with arguments
+          (app as any).logSuccess(`Method call: ${methodName}(${JSON.stringify(parsed)})`);
+
           // Pass the parsed data as a single argument to the method
           const result = await routes[url.pathname]!(app, [parsed]);
+
+          // Log method result
+          (app as any).logSuccess(`Method result: ${methodName} -> ${JSON.stringify(result)}`);
+
           res.writeHead(200, { "Content-Type": "application/json" });
           res.end(JSON.stringify({ status: "ok", result }));
         } catch (err: any) {
+          (app as any).logError(`Method error: ${url.pathname.substring(1)} -> ${err.message}`);
           res.writeHead(500, { "Content-Type": "application/json" });
           res.end(JSON.stringify({ error: err.message }));
         }

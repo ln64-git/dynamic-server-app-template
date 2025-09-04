@@ -7,4 +7,8 @@ export class SampleClass extends DynamicServerApp<ExtractState<SampleClass>> {
   async defaultFunction(): Promise<string> {
     return `${this.message}`;
   }
+
+  async greet(name: string): Promise<string> {
+    return `Hello, ${name}! Message: ${this.message}`;
+  }
 }
