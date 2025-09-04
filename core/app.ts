@@ -10,10 +10,9 @@ export type ExtractState<T> = {
 };
 
 export abstract class DynamicServerApp<T extends Record<string, any>> {
-  abstract port: number;
+  port = 2000;
 
   isServerInstance = false;
-  private stateFile = '';
   private isDevelopment = false;
   private logPrefix = '';
 
@@ -354,7 +353,7 @@ export async function startServer<T extends Record<string, any>>(
   app: DynamicServerApp<T>,
   options: { port?: number; routes?: Record<string, RemoteAction<T>> } = {}
 ) {
-  let port = await findAvailablePort(options.port ?? 2001);
+  let port = await findAvailablePort(options.port ?? 2000);
   app.port = port;
   const routes = options.routes ?? {};
 

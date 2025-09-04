@@ -1,7 +1,6 @@
 import { DynamicServerApp, type ExtractState } from "../core/app";
 
 export class SampleClass extends DynamicServerApp<ExtractState<SampleClass>> {
-  port = 2000;
   message = "Hello, world!";
 
   async defaultFunction(): Promise<string> {
