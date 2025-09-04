@@ -18,7 +18,15 @@ export abstract class DynamicServerApp<T extends Record<string, any>> {
   private logPrefix = '';
 
   private getStateFilePath(): string {
-    return `core/.app-state-${this.port}.json`;
+    // Use port-specific filename only for server instances or when port is explicitly set
+    const isServerInstance = (this as any).isServerInstance;
+    const portExplicitlySet = (this as any).portExplicitlySet;
+
+    if (isServerInstance || portExplicitlySet) {
+      return `core/.app-state-${this.port}.json`;
+    } else {
+      return `core/.app-state.json`;
+    }
   }
 
   // Port-specific logging
@@ -27,7 +35,7 @@ export abstract class DynamicServerApp<T extends Record<string, any>> {
   }
 
   private log(message: string, emoji = '🔹'): void {
-    const prefix = this.logPrefix || this.createLogPrefix(this.port);
+    const prefix = this.logPrefix || '';
     console.log(`${prefix} ${emoji} ${message}`);
   }
 
@@ -50,6 +58,12 @@ export abstract class DynamicServerApp<T extends Record<string, any>> {
       "stateFile",
       "isDevelopment"
     ]);
+
+    // Only exclude port if it wasn't explicitly set or we're not in server mode
+    const shouldExcludePort = !(this as any).portExplicitlySet && !(this as any).isServerInstance;
+    if (shouldExcludePort) {
+      exclude.add("port");
+    }
 
     for (const key of Object.keys(this)) {
       if (!exclude.has(key) && typeof (this as any)[key] !== "function") {
@@ -206,12 +220,18 @@ export async function runDynamicApp<T extends Record<string, any>>(
   app: DynamicServerApp<T>
 ): Promise<void> {
   const { serve, notify, port, dev, view, setState, targetPort, command, property, value } = cliToState(app.getState() as T);
+  const portExplicitlySet = !!port;
   if (port) app.port = port;
   (app as any).notifyEnabled = notify;
   (app as any).isDevelopment = dev;
+  (app as any).portExplicitlySet = portExplicitlySet;
 
-  // Set log prefix for this instance
-  (app as any).logPrefix = `[${app.port}]`;
+  // Set log prefix for this instance (only show port if explicitly set via CLI)
+  if (portExplicitlySet || serve) {
+    (app as any).logPrefix = `[${app.port}]`;
+  } else {
+    (app as any).logPrefix = '';
+  }
 
   // Handle view flag - show functions and variables
   if (view) {
@@ -254,6 +274,9 @@ export async function runDynamicApp<T extends Record<string, any>>(
   if (!(app as any).lastUpdated) {
     (app as any).lastUpdated = new Date().toISOString();
   }
+
+  // Save initial state
+  await (app as any).saveState();
 
   (app as any).enableAutoSave();
 
@@ -487,7 +510,10 @@ export function cliToState<T extends Record<string, any>>(defaults: T): {
     const arg = args[i];
     if (arg === "--serve") serve = true;
     if (arg === "--notify") notify = true;
-    if (arg === "--port") port = Number(args[i + 1]);
+    if (arg === "--port") {
+      port = Number(args[i + 1]);
+      i++; // Skip the port argument
+    }
     if (arg === "--dev") dev = true;
     if (arg === "--view") view = true;
     if (arg === "--set-state") {
