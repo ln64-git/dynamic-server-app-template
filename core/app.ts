@@ -123,20 +123,61 @@ function createStatefulProxy<T extends App>(instance: T, dev: boolean = false): 
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
+// SYSTEM NOTIFICATION
+// ═══════════════════════════════════════════════════════════════════════════
+
+async function sendNotification(title: string, message: string): Promise<void> {
+  try {
+    // Try notify-send (Linux)
+    const result = await Bun.spawn(['notify-send', title, message], {
+      stdout: 'ignore',
+      stderr: 'ignore',
+    }).exited;
+
+    if (result !== 0) {
+      // Fallback: just log if notify-send fails
+      console.log(`[NOTIFY] ${title}: ${message}`);
+    }
+  } catch (error) {
+    // notify-send not available, just log
+    console.log(`[NOTIFY] ${title}: ${message}`);
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
 // CLI PARSER
 // ═══════════════════════════════════════════════════════════════════════════
 
-function parseCLI(): { serve: boolean; port?: number; dev: boolean } {
+function parseCLI(): { serve: boolean; port?: number; dev: boolean; notify: boolean; method?: string; methodArgs: any[] } {
   const args = process.argv.slice(2);
   const flags = {
     serve: args.includes('--serve'),
     port: undefined as number | undefined,
     dev: args.includes('--dev'),
+    notify: args.includes('--notify'),
+    method: undefined as string | undefined,
+    methodArgs: [] as any[],
   };
 
   const portIndex = args.indexOf('--port');
   if (portIndex !== -1 && args[portIndex + 1]) {
     flags.port = parseInt(args[portIndex + 1]!, 10);
+  }
+
+  // Find first non-flag argument as method name
+  const portValue = portIndex !== -1 ? args[portIndex + 1] : undefined;
+  const nonFlagArgs = args.filter(arg => !arg.startsWith('--') && arg !== portValue);
+
+  if (nonFlagArgs.length > 0) {
+    flags.method = nonFlagArgs[0];
+    // Parse remaining arguments as JSON if possible, otherwise keep as strings
+    flags.methodArgs = nonFlagArgs.slice(1).map(arg => {
+      try {
+        return JSON.parse(arg);
+      } catch {
+        return arg;
+      }
+    });
   }
 
   return flags;
@@ -247,7 +288,7 @@ async function serve<T extends App>(app: T, requestedPort: number): Promise<void
 // ═══════════════════════════════════════════════════════════════════════════
 
 export async function run<T extends App>(app: T): Promise<void> {
-  const { serve: shouldServe, port, dev } = parseCLI();
+  const { serve: shouldServe, port, dev, notify, method, methodArgs } = parseCLI();
 
   // Set port if provided
   if (port) app.port = port;
@@ -264,16 +305,33 @@ export async function run<T extends App>(app: T): Promise<void> {
     return;
   }
 
-  // Local mode - run defaultFunction
-  if (typeof (statefulApp as any).defaultFunction === 'function') {
+  // Local mode - run specified method or defaultFunction
+  const functionToCall = method || 'defaultFunction';
+
+  if (typeof (statefulApp as any)[functionToCall] === 'function') {
     try {
-      const result = await (statefulApp as any).defaultFunction();
+      const result = await (statefulApp as any)[functionToCall](...methodArgs);
       if (result !== undefined) {
         console.log(result);
+
+        // Send notification if --notify flag is set
+        if (notify) {
+          const message = typeof result === 'string' ? result : JSON.stringify(result);
+          await sendNotification(functionToCall, message);
+        }
       }
     } catch (error: any) {
       console.error('Error:', error.message);
+
+      // Send error notification if --notify flag is set
+      if (notify) {
+        await sendNotification(`Error: ${functionToCall}`, error.message);
+      }
+
       process.exit(1);
     }
+  } else {
+    console.error(`Error: Method '${functionToCall}' not found`);
+    process.exit(1);
   }
 }

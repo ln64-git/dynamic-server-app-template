@@ -10,4 +10,8 @@ export class SampleClass extends App {
   async greet(name: string): Promise<string> {
     return `Hello, ${name}! Message: ${this.message}`;
   }
+
+  async keepSystemUpdated(): Promise<string> {
+    return "System update check running...";
+  }
 }
