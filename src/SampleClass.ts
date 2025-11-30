@@ -1,6 +1,6 @@
-import { DynamicServerApp, type ExtractState } from "../core/app";
+import { App } from "../core/app";
 
-export class SampleClass extends DynamicServerApp<ExtractState<SampleClass>> {
+export class SampleClass extends App {
   message = "Hello, world!";
 
   async defaultFunction(): Promise<string> {

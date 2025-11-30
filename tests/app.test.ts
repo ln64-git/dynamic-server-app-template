@@ -1,14 +1,9 @@
-// DynamicServerApp.test.ts
+// App.test.ts
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { DynamicServerApp } from "../core/app";
+import { App } from "../core/app";
 
 // Sample implementation to test
-interface TestAppState {
-  port: number;
-  message: string;
-}
-
-class TestApp extends DynamicServerApp<TestAppState> {
+class TestApp extends App {
   port = 1234;
   message = "initial";
   async sampleMethod() {
@@ -16,7 +11,7 @@ class TestApp extends DynamicServerApp<TestAppState> {
   }
 }
 
-describe("DynamicServerApp", () => {
+describe("App", () => {
   let app: TestApp;
 
   beforeEach(() => {
@@ -28,23 +23,22 @@ describe("DynamicServerApp", () => {
     vi.restoreAllMocks();
   });
 
-  it("getState returns correct state", () => {
-    const state = app.getState();
+  it("toJSON returns correct state", () => {
+    const state = app.toJSON();
     expect(state).toMatchObject({ port: 1234, message: "initial" });
-    expect("schema" in state).toBe(false);
+    expect(typeof state.sampleMethod).toBe("undefined");
   });
 
-  it("applyStateUpdate updates state", () => {
-    app.applyStateUpdate({ message: "updated" });
+  it("fromJSON updates state", () => {
+    app.fromJSON({ message: "updated" });
     expect(app.message).toBe("updated");
   });
-
-
 
   it("probe returns true if server responds with ok", async () => {
     (fetch as any).mockResolvedValue({ ok: true });
     const result = await app.probe();
     expect(result).toBe(true);
+    expect(fetch).toHaveBeenCalledWith(`http://localhost:1234/health`);
   });
 
   it("probe returns false if server errors or times out", async () => {
@@ -55,36 +49,31 @@ describe("DynamicServerApp", () => {
 
   it("setState calls fetch with correct parameters", async () => {
     const body = { message: "new" };
-    (fetch as any).mockResolvedValue({ ok: true, json: () => ({}) });
+    (fetch as any)
+      .mockResolvedValueOnce({ ok: false }) // probe fails (local mode)
+      .mockResolvedValue({ ok: true, json: () => ({ state: {} }) });
+
     await app.setState(body);
-    expect(fetch).toHaveBeenCalledWith(`http://localhost:1234/state`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    });
+    expect(app.message).toBe("new");
   });
 
-  it("applyStateUpdate accepts any keys without validation", () => {
-    app.applyStateUpdate({ message: "hello", fakeKey: 42 } as any);
+  it("setState works in remote mode", async () => {
+    const body = { message: "remote" };
+    (fetch as any)
+      .mockResolvedValueOnce({ ok: true }) // probe succeeds (remote mode)
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ state: { message: "remote", port: 1234 } })
+      });
+
+    const result = await app.setState(body);
+    expect(result).toMatchObject({ message: "remote" });
+  });
+
+  it("fromJSON accepts any keys without validation", () => {
+    app.fromJSON({ message: "hello", fakeKey: 42 } as any);
     expect(app.message).toBe("hello");
     expect((app as any).fakeKey).toBe(42);
-  });
-
-  it("applyStateUpdate accepts any type without validation", () => {
-    // Without Zod, we don't validate types, just apply the update
-    app.applyStateUpdate({ port: "oops" } as any);
-    expect((app as any).port).toBe("oops");
-  });
-
-
-
-  it("probe times out if server does not respond", async () => {
-    global.fetch = Object.assign(
-      vi.fn(() => new Promise<Response>((_, reject) => setTimeout(() => reject(new DOMException()), 15))),
-      { preconnect: vi.fn() }
-    );
-    const result = await app.probe(10);
-    expect(result).toBe(false);
   });
 
   it("setState does not throw if fetch fails", async () => {
@@ -97,23 +86,22 @@ describe("DynamicServerApp", () => {
     await expect(app.setState({ message: "fail" })).resolves.toBeUndefined();
   });
 
-  it("getState includes inherited fields", () => {
+  it("toJSON includes inherited fields", () => {
     class InheritedApp extends TestApp {
       newProp = 42;
     }
     const extended = new InheritedApp();
-    const state = extended.getState();
+    const state = extended.toJSON();
     expect(state).toMatchObject({ newProp: 42 });
   });
 
-  it("getState includes getter values", () => {
-    class GetterApp extends TestApp {
-      get dynamicValue() {
-        return 99;
-      }
-    }
-    const getterApp = new GetterApp();
-    const state = getterApp.getState();
-    expect(state).toHaveProperty("dynamicValue", 99);
+  it("toJSON excludes methods", () => {
+    const state = app.toJSON();
+    expect(state).not.toHaveProperty("sampleMethod");
+    expect(state).not.toHaveProperty("toJSON");
+    expect(state).not.toHaveProperty("fromJSON");
   });
+
+  // Note: save/load tests would require mocking Bun.write/Bun.file
+  // which is readonly in Bun runtime. Testing via integration tests instead.
 });

@@ -1,222 +1,312 @@
 # Dynamic Server App Template
 
-**A TypeScript class that becomes a web API and server.**
+**A minimalist TypeScript framework: your class becomes a web API.**
 
-Write your methods once. Use them everywhere.
+Write your methods once. Call them locally or over HTTP.
 
-Built on Bun. TypeScript. Zero config.
+Built on Bun. TypeScript. Zero config. **~280 lines of code.**
 
-## How to Use This Template
+## Quick Start
 
-### 1. Get Started
 ```bash
 git clone <repo> my-app
 cd my-app
 bun install
+bun run start
 ```
 
-### 2. Edit Your Class
-Open `src/SampleClass.ts` and add your methods:
+## Usage
+
+### 1. Create Your Class
 
 ```typescript
-export class SampleClass extends DynamicServerApp<SampleState> {
-  port = 3000;
+import { App } from "@core/app";
+
+class MyApp extends App {
   message = "Hello, world!";
-  
-  // Add your methods here
-  async greet(name: string) {
-    return `Hello, ${name}!`;
+
+  async defaultFunction() {
+    return this.message;
   }
-  
-  async getTime() {
-    return new Date().toISOString();
+
+  async greet(name: string) {
+    return `Hello, ${name}! ${this.message}`;
   }
 }
 ```
 
-### 3. Run Your App
+### 2. Run It
+
 ```bash
-# Run default function
+# Run locally (executes defaultFunction)
 bun run start
 
-# Or start as a server
-bun run start --serve
-```
-
-### 4. Use Your Methods
-Your methods are now available as:
-- **HTTP endpoints**: `POST http://localhost:3000/greet`
-- **Default function**: Runs automatically when you start the app
-
-## How It Works
-
-```typescript
-class MyApp extends DynamicServerApp<MyState> {
-  port = 3000;
-  message = "Hello, world!";
-
-  async greet(name: string) {
-    return `${this.message}, ${name}!`;
-  }
-}
-```
-
-**You now have:**
-- `POST /greet` - HTTP endpoint
-- Default function that runs automatically
-
-## Commands
-
-### Basic Usage
-```bash
-# Run default function (if exists)
-bun run start
-
-# Start server mode
-bun run start --serve
-```
-
-### Server Mode
-```bash
-# Start server
+# Start as HTTP server
 bun run start --serve
 
 # Use specific port
-bun run start --serve --port 3001
+bun run start --serve --port 3000
 
-# Enable desktop notifications
-bun run start --serve --notify
+# Enable dev mode (method timing)
+bun run start --dev
 ```
 
+## Features
 
+### Automatic State Persistence
+
+All properties are automatically saved to `.app-state.json`:
+
+```typescript
+class Counter extends App {
+  count = 0;
+
+  async increment() {
+    this.count++;  // Auto-saved!
+    return this.count;
+  }
+}
+```
+
+### Dual Mode: Local or Remote
+
+The same code runs locally or as an HTTP server:
+
+```bash
+# Local execution
+bun run start
+
+# Server mode
+bun run start --serve
+```
+
+### JSON-RPC API
+
+When running as a server, methods become HTTP endpoints:
+
+```bash
+# Health check
+curl http://localhost:2000/health
+
+# Get state
+curl http://localhost:2000/state
+
+# Call method (JSON-RPC format)
+curl -X POST http://localhost:2000/ \
+  -H "Content-Type: application/json" \
+  -d '{"method":"greet","params":["Alice"]}'
+
+# Update state
+curl -X POST http://localhost:2000/state \
+  -H "Content-Type: application/json" \
+  -d '{"message":"Updated!"}'
+```
 
 ## Examples
 
-### Chat Bot
+### Todo App
+
 ```typescript
-class ChatBot extends DynamicServerApp<ChatState> {
-  port = 3000;
-  conversations = new Map<string, Message[]>();
-  
-  async sendMessage(conversationId: string, text: string) {
-    const message = { id: Date.now(), text, timestamp: new Date() };
-    this.conversations.get(conversationId)?.push(message);
-    return message;
+class TodoApp extends App {
+  todos: string[] = [];
+
+  async defaultFunction() {
+    return `You have ${this.todos.length} todos`;
   }
-  
-  async getHistory(conversationId: string) {
-    return this.conversations.get(conversationId) || [];
+
+  async add(todo: string) {
+    this.todos.push(todo);
+    return this.todos;
+  }
+
+  async list() {
+    return this.todos;
+  }
+
+  async clear() {
+    this.todos = [];
+    return "Cleared!";
   }
 }
 ```
 
 ### Build System
+
 ```typescript
-class BuildSystem extends DynamicServerApp<BuildState> {
-  port = 3000;
+class BuildSystem extends App {
   isBuilding = false;
-  lastBuildTime = null;
-  
+  lastBuildTime: string | null = null;
+
   async build() {
     this.isBuilding = true;
-    // Your build logic
-    this.lastBuildTime = new Date();
+    // Your build logic here
+    await new Promise(r => setTimeout(r, 1000));
+    this.lastBuildTime = new Date().toISOString();
     this.isBuilding = false;
     return "Build complete!";
   }
-  
-  async watch() {
-    // Start file watcher
-    return "Watching for changes...";
+
+  async status() {
+    return {
+      building: this.isBuilding,
+      lastBuild: this.lastBuildTime
+    };
   }
 }
 ```
 
 ### Data Processor
+
 ```typescript
-class DataProcessor extends DynamicServerApp<ProcessorState> {
-  port = 3000;
-  queue = [];
-  processing = false;
-  
+class DataProcessor extends App {
+  queue: Array<{id: number, data: any}> = [];
+  processed = 0;
+
   async addJob(data: any) {
-    this.queue.push({ id: Date.now(), data, status: 'pending' });
-    return `Job ${this.queue.length} queued`;
+    this.queue.push({ id: Date.now(), data });
+    return `Queued job #${this.queue.length}`;
   }
-  
-  async processQueue() {
-    this.processing = true;
-    // Process all pending jobs
-    this.processing = false;
-    return `Processed ${this.queue.length} jobs`;
+
+  async process() {
+    while (this.queue.length > 0) {
+      const job = this.queue.shift();
+      // Process job...
+      this.processed++;
+    }
+    return `Processed ${this.processed} total jobs`;
   }
 }
 ```
 
-## API Endpoints
+## API Reference
 
-When running with `--serve`, your app automatically exposes:
+### Base Class: `App`
 
+```typescript
+abstract class App {
+  port: number = 2000;
+
+  // Serialize to JSON (excludes methods)
+  toJSON(): Record<string, JSONValue>
+
+  // Load from JSON
+  fromJSON(data: Record<string, JSONValue>): void
+
+  // Save state to .app-state.json
+  async save(): Promise<void>
+
+  // Load state from .app-state.json
+  async load(): Promise<void>
+
+  // Check if server is running on port
+  async probe(): Promise<boolean>
+
+  // Set state (local or remote)
+  async setState(updates: Record<string, JSONValue>): Promise<Record<string, JSONValue> | undefined>
+}
+```
+
+### Main Runner: `run(app)`
+
+```typescript
+async function run<T extends App>(app: T): Promise<void>
+```
+
+Handles CLI parsing, state loading, auto-save setup, and mode dispatch.
+
+## CLI Flags
+
+- `--serve` - Start HTTP server
+- `--port <number>` - Set port (default: 2000)
+- `--dev` - Enable development mode (method timing)
+
+## HTTP Endpoints
+
+When running with `--serve`:
+
+- `GET /health` - Health check
 - `GET /state` - Get current state
-- `POST /state` - Update state  
-- `POST /<method-name>` - Call any method
+- `POST /state` - Update state (with diff)
+- `POST /` - JSON-RPC method dispatch
 
-### HTTP Examples
-```bash
-# Get state
-curl http://localhost:3000/state
+### JSON-RPC Format
 
-# Update state
-curl -X POST http://localhost:3000/state \
-  -H "Content-Type: application/json" \
-  -d '{"message": "Hello from API"}'
-
-# Call method
-curl -X POST http://localhost:3000/greet \
-  -H "Content-Type: application/json" \
-  -d '["Alice"]'
-```
-
-## Advanced Features
-
-### Default Function
-```typescript
-class MyApp extends DynamicServerApp<MyState> {
-  port = 3000;
-  
-  // This runs automatically with: bun run start
-  async defaultFunction() {
-    return "Hello from default function!";
-  }
+```json
+{
+  "method": "methodName",
+  "params": ["arg1", "arg2"]
 }
 ```
 
-### State Management
-```typescript
-class MyApp extends DynamicServerApp<MyState> {
-  port = 3000;
-  counter = 0;
-  users = [];
-  
-  async increment() {
-    this.counter++;
-    return this.counter;
-  }
-  
-  async addUser(name: string) {
-    this.users.push({ id: Date.now(), name });
-    return this.users;
-  }
+Response:
+
+```json
+{
+  "result": "return value"
 }
 ```
 
-### Server Detection
-The framework automatically detects if a server is running and routes commands appropriately:
-- If server is running: Commands go to the server
-- If server is not running: Commands execute locally
+## Architecture
 
-## That's It
+The framework is built on three core concepts:
 
-Your class becomes a complete application ecosystem. No routing. No middleware. No configuration.
+1. **Proxy-based Auto-Save** - Property changes trigger automatic state persistence
+2. **JSON-RPC** - Standard protocol for remote method invocation
+3. **Bun Native APIs** - Leverages `Bun.serve`, `Bun.write`, `Bun.file`
 
-Just write your logic and run.
+**Total: ~280 lines of code** (down from 670 lines in previous version)
+
+## Migration from v1
+
+If migrating from the older DynamicServerApp:
+
+### Class Declaration
+
+```typescript
+// Old
+class MyClass extends DynamicServerApp<ExtractState<MyClass>> { }
+
+// New
+class MyClass extends App { }
+```
+
+### Runner Function
+
+```typescript
+// Old
+await runDynamicApp(instance);
+
+// New
+await run(instance);
+```
+
+### HTTP API
+
+```typescript
+// Old: POST /methodName with array body
+curl -X POST http://localhost:3000/greet -d '["Alice"]'
+
+// New: POST / with JSON-RPC format
+curl -X POST http://localhost:3000/ -d '{"method":"greet","params":["Alice"]}'
+```
+
+### Removed Features
+
+- `--notify` flag (desktop notifications)
+- `--view` flag (show structure)
+- `--set-state` / `--target-port` flags
+- `set/get` CLI commands
+- `GET /methods` endpoint
+- Port-specific state files
+
+## Why This Approach?
+
+**Minimal** - Everything fits in one file (~280 lines)
+**Elegant** - Uses modern JavaScript Proxy and Bun APIs
+**Powerful** - Full HTTP API with zero configuration
+**Type-Safe** - Full TypeScript support
+**Fast** - Built on Bun, uses efficient state diffing
+
+## License
+
+MIT
